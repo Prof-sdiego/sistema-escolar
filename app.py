@@ -16,7 +16,8 @@ st.markdown(hide_menu, unsafe_allow_html=True)
 # --- CONFIGURAÇÃO IA GEMINI ---
 try:
     genai.configure(api_key=st.secrets["gemini_key"])
-    modelo_ia = genai.GenerativeModel('gemini-pro')
+    # MUDANÇA AQUI: Usando o modelo mais recente e estável
+    modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
     st.error(f"Erro Config IA: {e}")
     modelo_ia = None
@@ -31,7 +32,7 @@ def conectar():
 
 # --- LEITURA INTELIGENTE ---
 
-def carregar_alertas(): # Sem cache (Urgente)
+def carregar_alertas(): 
     try:
         sheet = conectar().worksheet("Alertas")
         dados = sheet.get_all_records()
@@ -41,7 +42,7 @@ def carregar_alertas(): # Sem cache (Urgente)
         return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
 
 @st.cache_data(ttl=60) 
-def carregar_ocorrencias_cache(): # Cache 60s (Pesado)
+def carregar_ocorrencias_cache(): 
     try:
         sheet = conectar().sheet1
         dados = sheet.get_all_records()
@@ -51,7 +52,7 @@ def carregar_ocorrencias_cache(): # Cache 60s (Pesado)
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def carregar_professores(): # Cache 1h (Estático)
+def carregar_professores(): 
     try:
         sheet = conectar().worksheet("Professores")
         dados = sheet.get_all_records()
@@ -108,7 +109,7 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- IA (CORREÇÃO DE SEGURANÇA APLICADA) ---
+# --- IA (GEMINI 1.5 FLASH + SEGURANÇA LIBERADA) ---
 def consultar_ia(descricao, turma):
     if modelo_ia is None: return "Erro Config", "IA Off"
     
@@ -116,7 +117,7 @@ def consultar_ia(descricao, turma):
     Responda formato exato: GRAVIDADE: [Alta/Média/Baixa] AÇÃO: [Sugestão curta]"""
     
     try:
-        # AQUI ESTÁ A CORREÇÃO: Liberamos todos os filtros de segurança
+        # Configurações para permitir conteúdo sobre violência escolar (necessário para gestão)
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -134,7 +135,6 @@ def consultar_ia(descricao, turma):
             acao = partes[1].strip() if len(partes) > 1 else texto
         return grav, acao
     except Exception as e:
-        # Agora mostra o erro detalhado se falhar
         return "Erro IA", f"Detalhe: {e}"
 
 # --- SESSÃO ---
