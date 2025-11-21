@@ -3,3 +3,4 @@ pandas
 gspread
 oauth2client
 streamlit-autorefresh
+google-generativeai
