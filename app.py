@@ -6,48 +6,71 @@ from datetime import datetime
 import json
 import time
 from streamlit_autorefresh import st_autorefresh
+import google.generativeai as genai
 
 # --- CONFIGURAÇÕES GERAIS ---
-st.set_page_config(page_title="Sistema Escolar Pro", layout="wide")
-
-# Esconder menus padrões
+st.set_page_config(page_title="Sistema Escolar AI", layout="wide")
 hide_menu = """<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>"""
 st.markdown(hide_menu, unsafe_allow_html=True)
 
-# --- CONEXÃO GOOGLE SHEETS ---
+# --- CONFIGURAÇÃO IA GEMINI ---
+try:
+    genai.configure(api_key=st.secrets["gemini_key"])
+    modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
+except:
+    st.error("Falta configurar a 'gemini_key' nos Secrets do Streamlit.")
+
+# --- FUNÇÕES DE CONEXÃO ---
 def conectar():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(st.secrets["service_account_info"]), scope)
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- FUNÇÕES DE DADOS ---
+# --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_dados(aba_nome):
     try:
         sheet = conectar().worksheet(aba_nome)
         dados = sheet.get_all_records()
         df = pd.DataFrame(dados)
-        
-        # CORREÇÃO DE ERRO: Se a planilha estiver vazia (sem dados na linha 2),
-        # o DataFrame vem sem colunas. Aqui forçamos as colunas a existirem.
         if df.empty:
-            if aba_nome == "Alertas":
-                return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
-            elif "Página1" in aba_nome: # Ocorrências
-                return pd.DataFrame(columns=["Data", "Aluno", "Turma", "Professor", "Descricao", "Acao_Sugerida", "Intervencao"])
-            elif "Professores" in aba_nome:
-                return pd.DataFrame(columns=["Nome", "Codigo"])
-                
+            if aba_nome == "Alertas": return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
+            elif "Página1" in aba_nome: return pd.DataFrame(columns=["Data", "Aluno", "Turma", "Professor", "Descricao", "Acao_Sugerida", "Intervencao", "Status_Gestao"])
+            elif "Professores" in aba_nome: return pd.DataFrame(columns=["Nome", "Codigo"])
         return df
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 def salvar_ocorrencia(alunos, turma, prof, desc, acao, intervencao=""):
     sheet = conectar().sheet1
     data = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Coluna H é o Status_Gestao, iniciamos como "Pendente"
     for aluno in alunos:
-        # Adiciona na planilha: Data, Aluno, Turma, Prof, Descrição, Ação Sugerida, Intervenção Gestão
-        sheet.append_row([data, aluno, turma, prof, desc, acao, intervencao])
+        sheet.append_row([data, aluno, turma, prof, desc, acao, intervencao, "Pendente"])
+
+def atualizar_status_gestao(aluno, data, novo_status, intervencao_texto=None):
+    wb = conectar()
+    sheet = wb.sheet1
+    # Busca a linha correta (Lógica simplificada: procura pelo aluno)
+    # Em produção idealmente usaríamos IDs únicos, mas aqui procuramos a celula do aluno
+    cell = sheet.find(aluno)
+    if cell:
+        # Status_Gestao é coluna 8 (H)
+        sheet.update_cell(cell.row, 8, novo_status)
+        if intervencao_texto:
+            # Intervenção é coluna 7 (G)
+            sheet.update_cell(cell.row, 7, intervencao_texto)
+
+def excluir_ocorrencia(aluno, descricao_trecho):
+    wb = conectar()
+    sheet = wb.sheet1
+    dados = sheet.get_all_records()
+    # Procura a linha para deletar
+    for i, row in enumerate(dados):
+        # Compara Aluno e um pedaço da descrição para garantir
+        if row['Aluno'] == aluno and descricao_trecho in row['Descricao']:
+            sheet.delete_rows(i + 2) # +2 por causa do cabeçalho e indice 0
+            break
 
 def salvar_alerta(turma, prof):
     sheet = conectar().worksheet("Alertas")
@@ -55,45 +78,44 @@ def salvar_alerta(turma, prof):
     sheet.append_row([data, turma, prof, "Pendente"])
 
 def atualizar_alerta_status(turma, novo_status):
-    # Esta função busca o alerta pendente e muda o status
     wb = conectar()
     sheet = wb.worksheet("Alertas")
     dados = sheet.get_all_records()
-    
-    # Procura a linha (adicionamos 2 porque planilhas começam na linha 1 e tem cabeçalho)
     for i, row in enumerate(dados):
         if row['Turma'] == turma and row['Status'] != "Resolvido":
-            sheet.update_cell(i + 2, 4, novo_status) # Coluna 4 é o Status
+            sheet.update_cell(i + 2, 4, novo_status)
             break
 
-def adicionar_intervencao_ocorrencia(aluno, data_hora, texto_intervencao):
-    wb = conectar()
-    sheet = wb.sheet1
-    # Procura a ocorrência para adicionar a intervenção (Lógica simplificada por data e aluno)
-    # Nota: Em sistemas reais usamos ID, aqui usaremos busca simples
-    cell = sheet.find(aluno)
-    if cell:
-        # A intervenção é a coluna 7 (G)
-        sheet.update_cell(cell.row, 7, texto_intervencao)
-
-# --- CÉREBRO DA IA (MELHORADO) ---
-def analisar_gravidade(texto):
-    texto = texto.lower()
-    # Usamos partes das palavras para pegar variações (ex: "soc" pega soco, socando, socaram)
-    graves = ['soc', 'bat', 'sang', 'fac', 'arm', 'agres', 'mat', 'chut', 'queb']
-    medias = ['xing', 'palav', 'desresp', 'celul', 'grit', 'atrap']
+# --- CÉREBRO IA (GEMINI REAL) ---
+def consultar_ia(descricao, turma):
+    prompt = f"""
+    Atue como um coordenador pedagógico experiente. Analise a seguinte ocorrência escolar:
+    Turma: {turma}
+    Descrição: "{descricao}"
     
-    if any(raiz in texto for raiz in graves):
-        return "Alta", "🚨 INTERVIR IMEDIATAMENTE"
-    elif any(raiz in texto for raiz in medias):
-        return "Média", "⚠️ Comunicar Pais/Responsáveis"
-    else:
-        return "Baixa", "👀 Arquivar e Observar"
+    Responda APENAS neste formato exato:
+    GRAVIDADE: [Alta/Média/Baixa]
+    AÇÃO: [Sua sugestão de intervenção curta e objetiva]
+    """
+    try:
+        response = modelo_ia.generate_content(prompt)
+        texto = response.text
+        # Separa gravidade e ação
+        gravidade = "Média"
+        acao = texto
+        if "GRAVIDADE:" in texto:
+            partes = texto.split("AÇÃO:")
+            gravidade = partes[0].replace("GRAVIDADE:", "").strip()
+            acao = partes[1].strip() if len(partes) > 1 else texto
+        return gravidade, acao
+    except:
+        return "Erro IA", "Não foi possível conectar à IA. Verifique a chave."
 
-# --- INICIALIZAÇÃO DE ESTADO ---
+# --- ESTADOS DA SESSÃO ---
+if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
+if 'prof_nome' not in st.session_state: st.session_state.prof_nome = ""
 if 'lista_alunos' not in st.session_state: st.session_state.lista_alunos = []
-if 'alerta_ativo' not in st.session_state: st.session_state.alerta_ativo = False
-if 'form_reset' not in st.session_state: st.session_state.form_reset = False
+if 'aba_ativa_gestao' not in st.session_state: st.session_state.aba_ativa_gestao = "🔥 Em Tempo Real"
 
 # --- INTERFACE ---
 st.title("🏫 Sistema Escolar Inteligente")
@@ -105,73 +127,58 @@ menu = st.sidebar.radio("Menu", ["Acesso Professor", "Painel Gestão"])
 # ==========================================
 if menu == "Acesso Professor":
     
-    # Login
-    with st.expander("Identificação", expanded=True):
-        prof_nome = st.text_input("Nome do Professor")
-        prof_senha = st.text_input("Código", type="password")
-    
-    profs_db = carregar_dados("Professores")
-    # Validação simples (converte codigo para string)
-    login_ok = False
-    if not profs_db.empty:
-        profs_db['Codigo'] = profs_db['Codigo'].astype(str)
-        if not profs_db[(profs_db['Nome'] == prof_nome) & (profs_db['Codigo'] == prof_senha)].empty:
-            login_ok = True
-            
-    if login_ok:
-        st.success(f"Olá, {prof_nome}")
-        
-        # --- BOTÃO DE PÂNICO (CHAMAR GESTÃO) ---
-        st.divider()
-        col_panico1, col_panico2 = st.columns([3,1])
-        with col_panico1:
-            st.write("### 🚨 Precisa de ajuda imediata?")
-        with col_panico2:
-            btn_chamar = st.button("CHAMAR GESTÃO")
-            
-        if btn_chamar:
-            st.session_state.alerta_ativo = True
-            
-        if st.session_state.alerta_ativo:
-            with st.form("form_panico"):
-                st.warning("A gestão será notificada imediatamente.")
-                turma_panico = st.selectbox("Qual a sala?", ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"])
-                enviar_panico = st.form_submit_button("CONFIRMAR CHAMADO")
-                
-                if enviar_panico:
-                    # Verifica se a gestão já está ocupada
-                    alertas = carregar_dados("Alertas")
-                    # Se tiver algum alerta "Em Atendimento", avisa
-                    em_atendimento = alertas[alertas['Status'] == "Em Atendimento"]
-                    
-                    salvar_alerta(turma_panico, prof_nome)
-                    
-                    if not em_atendimento.empty:
-                        st.info("A gestão está resolvendo outro caso, mas o seu entrou na fila de prioridade!")
+    # LOGIN PERSISTENTE
+    if not st.session_state.prof_logado:
+        with st.expander("🔐 Login do Professor", expanded=True):
+            login_nome = st.text_input("Nome")
+            login_codigo = st.text_input("Código", type="password")
+            if st.button("Entrar"):
+                df = carregar_dados("Professores")
+                if not df.empty:
+                    df['Codigo'] = df['Codigo'].astype(str)
+                    if not df[(df['Nome'] == login_nome) & (df['Codigo'] == login_codigo)].empty:
+                        st.session_state.prof_logado = True
+                        st.session_state.prof_nome = login_nome
+                        st.rerun()
                     else:
-                        st.success("Gestão notificada! Aguarde na sala.")
-                    
-                    time.sleep(3)
-                    st.session_state.alerta_ativo = False
+                        st.error("Dados incorretos.")
+    else:
+        # PROFESSOR LOGADO
+        prof_nome = st.session_state.prof_nome
+        col_top1, col_top2 = st.columns([4, 1])
+        col_top1.success(f"Logado como: **{prof_nome}**")
+        if col_top2.button("Sair"):
+            st.session_state.prof_logado = False
+            st.rerun()
+
+        # --- BOTÃO DE PÂNICO ---
+        st.markdown("---")
+        col_p1, col_p2 = st.columns([3, 1])
+        col_p1.write("### 🚨 Ajuda Imediata")
+        if col_p2.button("CHAMAR GESTÃO", type="primary"):
+            st.session_state.panico_mode = True
+        
+        if st.session_state.get('panico_mode'):
+            with st.form("panico_form"):
+                st.warning("Isso enviará um alerta vermelho para a coordenação.")
+                t_panico = st.selectbox("Sala Atual:", ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"])
+                if st.form_submit_button("CONFIRMAR ALERTA"):
+                    salvar_alerta(t_panico, prof_nome)
+                    st.success("Alerta enviado! A gestão está a caminho.")
+                    time.sleep(2)
+                    st.session_state.panico_mode = False
                     st.rerun()
 
-        st.divider()
-        st.subheader("📝 Registrar Ocorrência")
+        # --- FORMULÁRIO DE OCORRÊNCIA ---
+        st.markdown("---")
+        st.subheader("📝 Nova Ocorrência")
         
-        # Reset dos campos após envio
-        if st.session_state.get('reset_campos'):
-            st.session_state.lista_alunos = []
-            st.session_state.pop('reset_campos')
-        
-        # Seleção de Turma
         turma = st.selectbox("Turma", ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"])
         
-        # Adicionar Alunos
-        col_add1, col_add2 = st.columns([3,1])
-        nome_aluno = col_add1.text_input("Nome do Aluno (Adicionar)")
-        if col_add2.button("➕ Adicionar"):
-            if nome_aluno:
-                st.session_state.lista_alunos.append(nome_aluno)
+        c1, c2 = st.columns([3, 1])
+        novo_aluno = c1.text_input("Nome do Aluno")
+        if c2.button("➕ Adicionar"):
+            if novo_aluno: st.session_state.lista_alunos.append(novo_aluno)
         
         if st.session_state.lista_alunos:
             st.info(f"Alunos: {', '.join(st.session_state.lista_alunos)}")
@@ -179,165 +186,153 @@ if menu == "Acesso Professor":
                 st.session_state.lista_alunos = []
                 st.rerun()
 
-        descricao = st.text_area("Descrição dos Fatos")
+        descricao = st.text_area("Descrição")
         
-        if st.button("Enviar Ocorrência"):
+        if st.button("Analisar com IA e Salvar"):
             if st.session_state.lista_alunos and descricao:
-                gravidade, acao = analisar_gravidade(descricao)
-                salvar_ocorrencia(st.session_state.lista_alunos, turma, prof_nome, descricao, acao)
+                with st.spinner("A Inteligência Artificial está analisando o caso..."):
+                    gravidade, acao = consultar_ia(descricao, turma)
+                    salvar_ocorrencia(st.session_state.lista_alunos, turma, prof_nome, descricao, acao)
                 
-                st.success(f"Registrado! Classificação: {gravidade}")
-                st.session_state.reset_campos = True
+                st.success(f"Salvo! IA Classificou como: {gravidade}")
+                # Limpa apenas o formulário, mantém o login
+                st.session_state.lista_alunos = []
                 time.sleep(2)
                 st.rerun()
             else:
-                st.error("Adicione alunos e descrição.")
+                st.warning("Preencha todos os campos.")
 
 # ==========================================
 # ÁREA DA GESTÃO
 # ==========================================
 elif menu == "Painel Gestão":
-    # Auto-Refresh a cada 10 segundos para ver alertas
     st_autorefresh(interval=10000, key="gestaorefresh")
     
-    # --- LÓGICA DE ALERTAS (POP UP) ---
+    # POP UP DE ALERTA
     df_alertas = carregar_dados("Alertas")
     if not df_alertas.empty:
-        # Filtra pendentes
         pendentes = df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])]
+        for i, row in pendentes.iterrows():
+            st.error(f"🚨 ALERTA: Sala {row['Turma']} - Prof. {row['Professor']} ({row['Data']})")
+            c1, c2 = st.columns(2)
+            if row['Status'] == "Pendente":
+                if c1.button("👀 Estou vendo", key=f"ver_{i}"):
+                    atualizar_alerta_status(row['Turma'], "Em Atendimento")
+                    st.rerun()
+            else:
+                # Se já está em atendimento
+                if c1.button("✅ Resolvido (Sem registro)", key=f"ok_{i}"):
+                    atualizar_alerta_status(row['Turma'], "Resolvido")
+                    st.rerun()
+                if c2.button("📝 Resolver e Registrar", key=f"reg_{i}"):
+                    # Redireciona para aba de registro e preenche dados
+                    st.session_state.aba_ativa_gestao = "📝 Registrar Direto"
+                    st.session_state.dados_panico = {"turma": row['Turma'], "prof": row['Professor']}
+                    # NÃO marcamos como resolvido ainda, só depois de salvar o form
+                    st.rerun()
+
+    # ABAS DE NAVEGAÇÃO (Controladas por variavel para permitir redirecionamento)
+    tab1, tab2, tab3, tab4 = st.tabs(["🔥 Em Tempo Real", "📝 Registrar Direto", "🏫 Por Sala", "⚙️ Admin"])
+    
+    # ABA TEMPO REAL
+    with tab1:
+        st.header("Ocorrências Pendentes")
+        df = carregar_dados("Página1")
         
-        if not pendentes.empty:
-            for i, alerta in pendentes.iterrows():
-                cor = "error" if alerta['Status'] == "Pendente" else "warning"
+        if not df.empty and 'Status_Gestao' in df.columns:
+            # Filtra apenas o que não foi arquivado ("Pendente" ou vazio)
+            df_pendentes = df[df['Status_Gestao'] != "Arquivado"]
+            
+            if df_pendentes.empty:
+                st.info("Tudo limpo! Nenhuma pendência.")
+            
+            for index, row in df_pendentes.iloc[::-1].iterrows():
                 with st.container():
+                    # Cor baseada na gravidade (Texto da IA)
+                    cor = "#ffeeba" # Padrão Amarelo
+                    if "Alta" in str(row['Acao_Sugerida']): cor = "#f8d7da" # Vermelho
+                    elif "Baixa" in str(row['Acao_Sugerida']): cor = "#d4edda" # Verde
+                    
                     st.markdown(f"""
-                    <div style="background-color: #ffcccc; padding: 20px; border-radius: 10px; border: 2px solid red;">
-                        <h2 style="color: darkred;">🚨 CHAMADO DA SALA {alerta['Turma']}</h2>
-                        <p><b>Professor:</b> {alerta['Professor']} | <b>Hora:</b> {alerta['Data']}</p>
-                        <p><b>Status:</b> {alerta['Status']}</p>
+                    <div style="background-color: {cor}; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #ddd;">
+                        <small>{row['Data']} | {row['Turma']}</small><br>
+                        <strong>{row['Aluno']}</strong> (Prof: {row['Professor']})<br>
+                        <p style="margin: 5px 0;"><i>"{row['Descricao']}"</i></p>
+                        <b>🤖 IA:</b> {row['Acao_Sugerida']}
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    col_ok, col_resolver = st.columns(2)
+                    # BOTÕES DE AÇÃO
+                    c_ok, c_interv, c_exc = st.columns([1, 2, 1])
                     
-                    # Botão OK (Muda para Em Atendimento)
-                    if alerta['Status'] == "Pendente":
-                        if col_ok.button(f"Estou indo lá ({alerta['Turma']})", key=f"ok_{i}"):
-                            atualizar_alerta_status(alerta['Turma'], "Em Atendimento")
-                            st.rerun()
-                    
-                    # Botão Resolver/Registrar
-                    if alerta['Status'] == "Em Atendimento":
-                        st.write("---")
-                        st.write("Situação resolvida?")
-                        if st.button("✅ Apenas Resolvido (Sem Ocorrência)", key=f"res_{i}"):
-                            atualizar_alerta_status(alerta['Turma'], "Resolvido")
-                            st.rerun()
+                    # 1. Botão OK (Arquiva)
+                    if c_ok.button("✅ Ok / Visto", key=f"btn_ok_{index}"):
+                        atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado")
+                        st.rerun()
                         
-                        if st.button("📝 Resolver e Registrar Ocorrência", key=f"reg_{i}"):
-                            atualizar_alerta_status(alerta['Turma'], "Resolvido")
-                            # Prepara o formulário de gestão com a turma já preenchida
-                            st.session_state['gestao_turma_pre'] = alerta['Turma']
-                            st.session_state['aba_ativa'] = "Registrar Direto" 
+                    # 2. Botão Registrar Intervenção
+                    with c_interv.popover("✍️ Registrar Intervenção"):
+                        txt_interv = st.text_area("O que foi feito?", key=f"text_{index}")
+                        if st.button("Salvar e Arquivar", key=f"save_{index}"):
+                            atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", txt_interv)
+                            st.success("Intervenção salva!")
+                            time.sleep(1)
                             st.rerun()
-            st.divider()
+                            
+                    # 3. Botão Excluir
+                    if c_exc.button("🗑️ Excluir", key=f"del_{index}"):
+                        excluir_ocorrencia(row['Aluno'], row['Descricao'][:10]) # Usa parte da descriçao para identificar
+                        st.warning("Registro excluído.")
+                        time.sleep(1)
+                        st.rerun()
 
-    # --- MENU GESTÃO ---
-    abas = st.tabs(["🔥 Em Tempo Real", "📝 Registrar Direto", "🏫 Por Sala", "👥 Professores"])
-    
-    # ABA 1: TEMPO REAL
-    with abas[0]:
-        st.header("Monitoramento Ao Vivo")
-        df = carregar_dados("Página1") # Carrega ocorrências
+    # ABA REGISTRAR DIRETO
+    with tab2:
+        # Se veio do botão de pânico, preenche automático
+        dados_pre = st.session_state.get('dados_panico', {})
+        turma_def = dados_pre.get('turma', "6A")
         
-        if not df.empty:
-            # Ordenar por gravidade (Alta primeiro)
-            # Criamos uma coluna temporária de prioridade para ordenar
-            mapa_prioridade = {"Alta": 1, "Média": 2, "Baixa": 3}
-            # Garantimos que a coluna Gravidade existe e mapeamos
-            if 'Acao_Sugerida' in df.columns:
-                # A IA retorna "Alta", "Média" no texto da variavel gravidade, mas na planilha salvamos "Acao_Sugerida" e não a gravidade separada no codigo antigo
-                # Vamos ajustar para mostrar tudo.
-                # Exibindo cards
-                for index, row in df.iloc[::-1].iterrows(): # Inverte para ver o mais recente
-                    # Define cor baseada no texto da ação
-                    cor_card = "#f0f2f6"
-                    if "IMEDIATAMENTE" in str(row['Acao_Sugerida']):
-                        cor_card = "#ffbdc1" # Vermelho claro
-                        tag = "🔴 ALTA PRIORIDADE"
-                    elif "Comunicar" in str(row['Acao_Sugerida']):
-                        cor_card = "#ffeba8" # Amarelo
-                        tag = "🟠 MÉDIA"
-                    else:
-                        cor_card = "#d4edda" # Verde
-                        tag = "🟢 LEVE"
+        if dados_pre:
+            st.info(f"📝 Registrando ocorrência do chamado da sala {turma_def}")
 
-                    with st.container():
-                        st.markdown(f"""
-                        <div style="background-color: {cor_card}; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
-                            <strong>{tag}</strong> - {row['Data']} | Sala: {row['Turma']}<br>
-                            <b>Alunos:</b> {row['Aluno']} | <b>Prof:</b> {row['Professor']}<br>
-                            <i>"{row['Descricao']}"</i><br>
-                            <b>IA Sugere:</b> {row['Acao_Sugerida']}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Campo para registrar intervenção
-                        # Verifica se a coluna Intervenção existe (coluna 7)
-                        interv_atual = row.get('7', '') # Gspread as vezes retorna indices numericos ou o nome
-                        
-                        with st.expander("Registrar Intervenção/Desfecho"):
-                            texto_interv = st.text_area("O que foi feito?", key=f"txt_{index}")
-                            if st.button("Salvar Intervenção", key=f"btn_{index}"):
-                                adicionar_intervencao_ocorrencia(row['Aluno'], row['Data'], texto_interv)
-                                st.success("Intervenção salva!")
-                                time.sleep(1)
-                                st.rerun()
-        else:
-            st.info("Nenhuma ocorrência registrada.")
+        t_gestao = st.selectbox("Turma", ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"], index=["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"].index(turma_def) if turma_def in ["6A", "6B"] else 0)
+        
+        aluno_g = st.text_input("Nome do Aluno (Gestão)")
+        desc_g = st.text_area("Descrição")
+        interv_g = st.text_area("Intervenção já realizada")
+        
+        if st.button("Registrar Caso"):
+            # 1. Salva a ocorrencia
+            grav, acao = consultar_ia(desc_g, t_gestao)
+            salvar_ocorrencia([aluno_g], t_gestao, "GESTÃO", desc_g, acao, interv_g)
+            
+            # 2. Se tinha um alerta de pânico pendente, marca como resolvido agora
+            if dados_pre:
+                atualizar_alerta_status(turma_def, "Resolvido")
+                del st.session_state['dados_panico']
+            
+            st.success("Caso registrado e alerta baixado!")
+            time.sleep(2)
+            st.rerun()
 
-    # ABA 2: REGISTRAR DIRETO (GESTÃO)
-    with abas[1]:
-        st.subheader("Registro Administrativo")
-        # Pega a turma do alerta se houver
-        turma_pre = st.session_state.get('gestao_turma_pre', "6A")
-        
-        turma_g = st.selectbox("Turma", ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"], index=["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"].index(turma_pre) if turma_pre in ["6A", "6B"] else 0) # Simplificação do index
-        
-        # Lista de alunos (Gestão)
-        if 'lista_alunos_g' not in st.session_state: st.session_state.lista_alunos_g = []
-        col_g1, col_g2 = st.columns([3,1])
-        aluno_g = col_g1.text_input("Nome do Aluno")
-        if col_g2.button("➕ Incluir"):
-            st.session_state.lista_alunos_g.append(aluno_g)
-        st.caption(f"Lista: {st.session_state.lista_alunos_g}")
-        
-        desc_g = st.text_area("Descrição dos Fatos")
-        interv_g = st.text_area("Intervenção Realizada (Opcional)")
-        
-        if st.button("Registrar como Gestão"):
-            if st.session_state.lista_alunos_g and desc_g:
-                grav, acao = analisar_gravidade(desc_g)
-                salvar_ocorrencia(st.session_state.lista_alunos_g, turma_g, "GESTÃO", desc_g, acao, interv_g)
-                st.success("Registrado!")
-                st.session_state.lista_alunos_g = []
-                if 'gestao_turma_pre' in st.session_state: del st.session_state['gestao_turma_pre']
-                time.sleep(2)
-                st.rerun()
-
-    # ABA 3: POR SALA
-    with abas[2]:
+    # OUTRAS ABAS (Por Sala e Admin) mantêm-se similares ou simplificadas para foco
+    with tab3:
         df = carregar_dados("Página1")
         if not df.empty:
-            lista_turmas = df['Turma'].unique()
-            sel_turma = st.selectbox("Filtrar:", lista_turmas)
-            st.dataframe(df[df['Turma'] == sel_turma])
-            
-    # ABA 4: CADASTRO PROFS
-    with abas[3]:
-        with st.form("novo_prof"):
+            turma_filtro = st.selectbox("Filtrar Turma", df['Turma'].unique())
+            st.dataframe(df[df['Turma'] == turma_filtro])
+
+    with tab4:
+        st.write("Cadastro de Professores")
+        with st.form("novo_p"):
             n = st.text_input("Nome")
             c = st.text_input("Código")
-            if st.form_submit_button("Cadastrar"):
+            if st.form_submit_button("Salvar"):
                 conectar().worksheet("Professores").append_row([n, c])
-                st.success("Cadastrado!")
+                st.success("Feito")
+
+# Força a aba ativa se necessário (JavaScript hack)
+if st.session_state.aba_ativa_gestao == "📝 Registrar Direto":
+    # Isso é complexo de forçar visualmente sem componentes extras, 
+    # mas a lógica de preenchimento acima (tab2) já trata os dados se o usuario clicar na aba.
+    pass
