@@ -13,7 +13,7 @@ st.set_page_config(page_title="Sistema Escolar AI", layout="wide")
 hide_menu = """<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>"""
 st.markdown(hide_menu, unsafe_allow_html=True)
 
-# --- CONEXÃO (CACHE RESOURCE) ---
+# --- CONEXÃO BANCO DE DADOS (CACHE) ---
 @st.cache_resource
 def conectar():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -21,44 +21,54 @@ def conectar():
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- AUTO-DETECÇÃO DE IA (A CURA PARA O ERRO 404) ---
+# --- INTEGRAÇÃO IA (AUTO-DETECÇÃO DE MODELO) ---
 @st.cache_resource
-def carregar_modelo_ia():
+def configurar_ia_automatica():
     try:
         genai.configure(api_key=st.secrets["gemini_key"])
         
-        # Pergunta ao Google quais modelos estão disponíveis para esta chave
-        lista_modelos = []
+        # 1. Pede a lista de modelos disponíveis HOJE
+        todos_modelos = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                lista_modelos.append(m.name)
+                todos_modelos.append(m.name)
         
-        # Tenta encontrar o melhor modelo na ordem de preferência
-        preferidos = ["models/gemini-1.5-flash", "models/gemini-pro", "models/gemini-1.0-pro"]
+        # 2. Estratégia de Escolha (Prioridade para Flash atualizado)
         modelo_escolhido = None
         
-        # 1. Tenta os preferidos
-        for pref in preferidos:
-            if pref in lista_modelos:
-                modelo_escolhido = pref
+        # Tentativa 1: Procurar versões Flash atualizadas (ex: gemini-1.5-flash-002)
+        for m in todos_modelos:
+            if "flash" in m and "002" in m:
+                modelo_escolhido = m
                 break
         
-        # 2. Se não achar nenhum preferido, pega o primeiro da lista que funcione
-        if modelo_escolhido is None and lista_modelos:
-            modelo_escolhido = lista_modelos[0]
+        # Tentativa 2: Se não achar, qualquer Flash (ex: gemini-2.0-flash)
+        if not modelo_escolhido:
+            for m in todos_modelos:
+                if "flash" in m:
+                    modelo_escolhido = m
+                    break
+                    
+        # Tentativa 3: Qualquer modelo Gemini Pro atualizado
+        if not modelo_escolhido:
+            for m in todos_modelos:
+                if "gemini" in m and "002" in m:
+                    modelo_escolhido = m
+                    break
+
+        # Tentativa 4: O primeiro que aparecer (Desespero)
+        if not modelo_escolhido and todos_modelos:
+            modelo_escolhido = todos_modelos[0]
             
-        if modelo_escolhido:
-            return genai.GenerativeModel(modelo_escolhido), modelo_escolhido
-        else:
-            return None, "Nenhum modelo encontrado"
-            
+        return modelo_escolhido, todos_modelos
+        
     except Exception as e:
         return None, str(e)
 
-# Inicializa a IA uma vez
-modelo_ia, nome_modelo_ativo = carregar_modelo_ia()
+# Inicializa a IA e descobre o nome do modelo
+nome_modelo_ativo, lista_debug = configurar_ia_automatica()
 
-# --- LEITURA INTELIGENTE ---
+# --- FUNÇÕES DE LEITURA ---
 def carregar_alertas(): 
     try:
         sheet = conectar().worksheet("Alertas")
@@ -87,7 +97,7 @@ def carregar_professores():
     except:
         return pd.DataFrame()
 
-# --- ESCRITA ---
+# --- FUNÇÕES DE ESCRITA ---
 def limpar_cache():
     st.cache_data.clear()
 
@@ -136,15 +146,15 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- CONSULTA IA ---
+# --- CONSULTA IA (COM O MODELO DESCOBERTO) ---
 def consultar_ia(descricao, turma):
-    if modelo_ia is None: return "Erro Config", f"Falha IA: {nome_modelo_ativo}"
+    if not nome_modelo_ativo: return "Erro Config", f"Nenhum modelo encontrado. Lista: {lista_debug}"
     
     prompt = f"""Atue como coordenador pedagógico. Ocorrência: Turma {turma}, Descrição: "{descricao}".
     Responda formato exato: GRAVIDADE: [Alta/Média/Baixa] AÇÃO: [Sugestão curta]"""
     
     try:
-        # Segurança liberada para violência escolar
+        # Libera filtros de segurança para contexto escolar
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -152,7 +162,9 @@ def consultar_ia(descricao, turma):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         
-        response = modelo_ia.generate_content(prompt, safety_settings=safety_settings)
+        # Usa o modelo que descobrimos automaticamente
+        modelo = genai.GenerativeModel(nome_modelo_ativo)
+        response = modelo.generate_content(prompt, safety_settings=safety_settings)
         texto = response.text
         
         grav, acao = "Média", texto
@@ -161,8 +173,12 @@ def consultar_ia(descricao, turma):
             grav = partes[0].replace("GRAVIDADE:", "").strip()
             acao = partes[1].strip() if len(partes) > 1 else texto
         return grav, acao
+        
     except Exception as e:
-        return "Erro IA", f"Erro no modelo {nome_modelo_ativo}: {e}"
+        # Erro de cota (429) é comum em modelos muito novos ou experimentais
+        if "429" in str(e):
+            return "Erro Cota", "Muitos pedidos. Aguarde 1 minuto."
+        return "Erro IA", f"Modelo {nome_modelo_ativo} falhou: {e}"
 
 # --- SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
@@ -256,11 +272,10 @@ elif menu == "Painel Gestão":
     tab1, tab2, tab3, tab4 = st.tabs(["🔥 Tempo Real", "📝 Registrar", "🏫 Histórico", "⚙️ Admin"])
     
     with tab1:
-        # Mostra qual modelo está sendo usado (para sabermos que funcionou)
         if nome_modelo_ativo:
-            st.caption(f"IA Ativa: {nome_modelo_ativo}")
+            st.caption(f"🤖 Modelo IA em uso: {nome_modelo_ativo}")
         else:
-            st.error("Erro: Nenhum modelo IA disponível.")
+            st.error("⚠️ Nenhuma IA encontrada! Verifique se a API Key tem permissões.")
 
         df = carregar_ocorrencias_cache()
         if not df.empty and 'Status_Gestao' in df.columns:
