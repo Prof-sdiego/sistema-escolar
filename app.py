@@ -18,10 +18,10 @@ try:
     genai.configure(api_key=st.secrets["gemini_key"])
     modelo_ia = genai.GenerativeModel('gemini-pro')
 except Exception as e:
-    st.error(f"Erro IA: {e}")
+    st.error(f"Erro Config IA: {e}")
     modelo_ia = None
 
-# --- CONEXÃO (CACHE RESOURCE = Conecta uma vez e segura a porta aberta) ---
+# --- CONEXÃO (CACHE RESOURCE) ---
 @st.cache_resource
 def conectar():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -29,12 +29,10 @@ def conectar():
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- LEITURA INTELIGENTE (O SEGREDO ESTÁ AQUI) ---
+# --- LEITURA INTELIGENTE ---
 
-# 1. Alertas: SEM CACHE (Ou cache muito curto). Verifica sempre!
-def carregar_alertas():
+def carregar_alertas(): # Sem cache (Urgente)
     try:
-        # ttl=0 significa: não guarde na memória, vá buscar agora!
         sheet = conectar().worksheet("Alertas")
         dados = sheet.get_all_records()
         if not dados: return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
@@ -42,10 +40,8 @@ def carregar_alertas():
     except:
         return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
 
-# 2. Lista Grande: COM CACHE (Atualiza a cada 60 segundos)
-# Isso evita o erro de API, mesmo que a página atualize a cada 15s.
 @st.cache_data(ttl=60) 
-def carregar_ocorrencias_cache():
+def carregar_ocorrencias_cache(): # Cache 60s (Pesado)
     try:
         sheet = conectar().sheet1
         dados = sheet.get_all_records()
@@ -54,9 +50,8 @@ def carregar_ocorrencias_cache():
     except:
         return pd.DataFrame()
 
-# 3. Professores: Cache longo (quase nunca muda)
 @st.cache_data(ttl=3600)
-def carregar_professores():
+def carregar_professores(): # Cache 1h (Estático)
     try:
         sheet = conectar().worksheet("Professores")
         dados = sheet.get_all_records()
@@ -64,7 +59,7 @@ def carregar_professores():
     except:
         return pd.DataFrame()
 
-# --- FUNÇÕES DE ESCRITA (SEMPRE LIMPAR O CACHE AO SALVAR) ---
+# --- ESCRITA (LIMPA CACHE) ---
 def limpar_cache():
     st.cache_data.clear()
 
@@ -74,10 +69,10 @@ def salvar_ocorrencia(alunos, turma, prof, desc, acao, intervencao=""):
         data = datetime.now().strftime("%Y-%m-%d %H:%M")
         for aluno in alunos:
             sheet.append_row([data, aluno, turma, prof, desc, acao, intervencao, "Pendente"])
-        limpar_cache() # Força atualização imediata para quem salvou
+        limpar_cache()
         return True
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro Salvar: {e}")
         return False
 
 def atualizar_status_gestao(aluno, data, novo_status, intervencao_texto=None):
@@ -103,7 +98,6 @@ def excluir_ocorrencia(aluno, descricao_trecho):
 
 def salvar_alerta(turma, prof):
     conectar().worksheet("Alertas").append_row([datetime.now().strftime("%H:%M"), turma, prof, "Pendente"])
-    # Alertas não usam cache de leitura, então aparecem logo
 
 def atualizar_alerta_status(turma, novo_status):
     wb = conectar()
@@ -114,21 +108,34 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- IA ---
+# --- IA (CORREÇÃO DE SEGURANÇA APLICADA) ---
 def consultar_ia(descricao, turma):
     if modelo_ia is None: return "Erro Config", "IA Off"
+    
     prompt = f"""Atue como coordenador pedagógico. Ocorrência: Turma {turma}, Descrição: "{descricao}".
     Responda formato exato: GRAVIDADE: [Alta/Média/Baixa] AÇÃO: [Sugestão curta]"""
+    
     try:
-        response = modelo_ia.generate_content(prompt)
+        # AQUI ESTÁ A CORREÇÃO: Liberamos todos os filtros de segurança
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        
+        response = modelo_ia.generate_content(prompt, safety_settings=safety_settings)
         texto = response.text
+        
         grav, acao = "Média", texto
         if "GRAVIDADE:" in texto:
             partes = texto.split("AÇÃO:")
             grav = partes[0].replace("GRAVIDADE:", "").strip()
             acao = partes[1].strip() if len(partes) > 1 else texto
         return grav, acao
-    except: return "Pendente", "Erro IA"
+    except Exception as e:
+        # Agora mostra o erro detalhado se falhar
+        return "Erro IA", f"Detalhe: {e}"
 
 # --- SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
@@ -148,7 +155,7 @@ if menu == "Acesso Professor":
             ln = st.text_input("Nome")
             lc = st.text_input("Código", type="password")
             if st.button("Entrar"):
-                df = carregar_professores() # Usa cache longo
+                df = carregar_professores()
                 if not df.empty:
                     df['Codigo'] = df['Codigo'].astype(str)
                     if not df[(df['Nome'] == ln) & (df['Codigo'] == lc)].empty:
@@ -200,11 +207,9 @@ if menu == "Acesso Professor":
 
 # === GESTÃO ===
 elif menu == "Painel Gestão":
-    # ATUALIZAÇÃO RÁPIDA (15 segundos)
-    # Como usamos cache na lista grande, isso não vai travar o Google!
     st_autorefresh(interval=15000, key="gestaorefresh")
 
-    # 1. VERIFICA ALERTAS (Sem Cache - Vê na hora)
+    # ALERTAS
     df_alertas = carregar_alertas()
     if not df_alertas.empty:
         pendentes = df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])]
@@ -220,11 +225,10 @@ elif menu == "Painel Gestão":
                     st.session_state.aba_ativa_gestao = "reg"
                     st.rerun()
 
-    # 2. ABAS
+    # ABAS
     tab1, tab2, tab3, tab4 = st.tabs(["🔥 Tempo Real", "📝 Registrar", "🏫 Histórico", "⚙️ Admin"])
     
     with tab1:
-        # Carrega do Cache (Rápido e seguro)
         df = carregar_ocorrencias_cache()
         if not df.empty and 'Status_Gestao' in df.columns:
             pend = df[df['Status_Gestao'] != "Arquivado"]
