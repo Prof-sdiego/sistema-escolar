@@ -173,52 +173,33 @@ def consultar_ia(descricao, turma):
         return g, a
     except: return "Média", "Erro IA"
 
-# --- ESTADOS GERAIS ---
+# --- INICIALIZAÇÃO DE ESTADOS (CORREÇÃO DO ERRO!) ---
 if 'panico_mode' not in st.session_state: st.session_state.panico_mode = False
 if 'id_intervencao_ativa' not in st.session_state: st.session_state.id_intervencao_ativa = None
 if 'html_relatorio' not in st.session_state: st.session_state.html_relatorio = None
 if 'dados_impressao' not in st.session_state: st.session_state.dados_impressao = None
 if 'total_ocorrencias' not in st.session_state: st.session_state.total_ocorrencias = 0
 
-# --- PERSISTÊNCIA DE LOGIN VIA URL ---
-params = st.query_params
+# Verifica login gestão na sessão
+if 'gestao_logada' not in st.session_state: st.session_state.gestao_logada = False
+if 'gestao_nome' not in st.session_state: st.session_state.gestao_nome = ""
 
-# Login Professor
-if "prof_logado" in params:
-    st.session_state.prof_logado = True
-    st.session_state.prof_nome = params["prof_nome"]
+# Verifica login professor na sessão
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
 if 'prof_nome' not in st.session_state: st.session_state.prof_nome = ""
 
-if not st.session_state.gestao_logada:
-        with st.form("login_gestao"):
-            st.write("### 📊 Acesso Gestão")
-            gn = st.text_input("Usuário")
-            gc = st.text_input("Senha", type="password")
-            if st.form_submit_button("Acessar Painel"):
-                login_ok = False
-                
-                # 1. TENTA LOGIN MESTRE (HARDCODED) - PARA SALVAR VOCÊ AGORA
-                if gn == "Diego" and gc == "0000":
-                    login_ok = True
-                
-                # 2. SE NÃO FOR MESTRE, TENTA A PLANILHA
-                else:
-                    df_g = carregar_gestores()
-                    if not df_g.empty:
-                        # Garante que lemos tudo como texto
-                        df_g['Codigo'] = df_g['Codigo'].astype(str)
-                        if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty:
-                            login_ok = True
-                
-                if login_ok:
-                    st.session_state.gestao_logada = True
-                    st.session_state.gestao_nome = gn
-                    st.query_params["gestao_logada"] = "true"
-                    st.query_params["gestao_nome"] = gn
-                    st.rerun()
-                else:
-                    st.error("Acesso negado. Verifique se digitou certo ou se o cadastro existe.")
+# --- PERSISTÊNCIA DE LOGIN VIA URL ---
+params = st.query_params
+
+# Recupera Login Professor
+if "prof_logado" in params and not st.session_state.prof_logado:
+    st.session_state.prof_logado = True
+    st.session_state.prof_nome = params["prof_nome"]
+
+# Recupera Login Gestão
+if "gestao_logada" in params and not st.session_state.gestao_logada:
+    st.session_state.gestao_logada = True
+    st.session_state.gestao_nome = params["gestao_nome"]
 
 # --- FUNÇÃO HTML IMPRESSÃO ---
 def gerar_html_ficha(dados, is_report=False):
@@ -324,13 +305,19 @@ elif menu == "Painel Gestão":
             st.write("### 📊 Acesso Gestão")
             gn = st.text_input("Usuário"); gc = st.text_input("Senha", type="password")
             if st.form_submit_button("Acessar Painel"):
-                # LOGIN DIRETO NA PLANILHA GESTORES
-                df_g = carregar_gestores()
                 login_ok = False
-                if not df_g.empty:
-                    df_g['Codigo'] = df_g['Codigo'].astype(str)
-                    if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty:
-                        login_ok = True
+                
+                # --- LOGIN DE RESGATE (DIEGO) ---
+                if gn == "Diego" and gc == "0000":
+                    login_ok = True
+                # --------------------------------
+                
+                else:
+                    df_g = carregar_gestores()
+                    if not df_g.empty:
+                        df_g['Codigo'] = df_g['Codigo'].astype(str)
+                        if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty:
+                            login_ok = True
                 
                 if login_ok:
                     st.session_state.gestao_logada = True; st.session_state.gestao_nome = gn
