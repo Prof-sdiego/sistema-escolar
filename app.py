@@ -86,7 +86,7 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- CÉREBRO IA (GEMINI REAL) ---
+# --- CÉREBRO IA (MODO DEPURAÇÃO) ---
 def consultar_ia(descricao, turma):
     prompt = f"""
     Atue como um coordenador pedagógico experiente. Analise a seguinte ocorrência escolar:
@@ -98,8 +98,10 @@ def consultar_ia(descricao, turma):
     AÇÃO: [Sua sugestão de intervenção curta e objetiva]
     """
     try:
+        # Tenta gerar
         response = modelo_ia.generate_content(prompt)
         texto = response.text
+        
         # Separa gravidade e ação
         gravidade = "Média"
         acao = texto
@@ -108,8 +110,10 @@ def consultar_ia(descricao, turma):
             gravidade = partes[0].replace("GRAVIDADE:", "").strip()
             acao = partes[1].strip() if len(partes) > 1 else texto
         return gravidade, acao
-    except:
-        return "Erro IA", "Não foi possível conectar à IA. Verifique a chave."
+        
+    except Exception as e:
+        # AQUI ESTÁ A MUDANÇA: Ele vai mostrar o erro técnico na tela
+        return "Erro Técnico", f"O Google retornou este erro: {e}"
 
 # --- ESTADOS DA SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
