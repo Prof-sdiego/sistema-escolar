@@ -190,12 +190,35 @@ if "prof_logado" in params:
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
 if 'prof_nome' not in st.session_state: st.session_state.prof_nome = ""
 
-# Login Gestão
-if "gestao_logada" in params:
-    st.session_state.gestao_logada = True
-    st.session_state.gestao_nome = params["gestao_nome"]
-if 'gestao_logada' not in st.session_state: st.session_state.gestao_logada = False
-if 'gestao_nome' not in st.session_state: st.session_state.gestao_nome = ""
+if not st.session_state.gestao_logada:
+        with st.form("login_gestao"):
+            st.write("### 📊 Acesso Gestão")
+            gn = st.text_input("Usuário")
+            gc = st.text_input("Senha", type="password")
+            if st.form_submit_button("Acessar Painel"):
+                login_ok = False
+                
+                # 1. TENTA LOGIN MESTRE (HARDCODED) - PARA SALVAR VOCÊ AGORA
+                if gn == "Diego" and gc == "0000":
+                    login_ok = True
+                
+                # 2. SE NÃO FOR MESTRE, TENTA A PLANILHA
+                else:
+                    df_g = carregar_gestores()
+                    if not df_g.empty:
+                        # Garante que lemos tudo como texto
+                        df_g['Codigo'] = df_g['Codigo'].astype(str)
+                        if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty:
+                            login_ok = True
+                
+                if login_ok:
+                    st.session_state.gestao_logada = True
+                    st.session_state.gestao_nome = gn
+                    st.query_params["gestao_logada"] = "true"
+                    st.query_params["gestao_nome"] = gn
+                    st.rerun()
+                else:
+                    st.error("Acesso negado. Verifique se digitou certo ou se o cadastro existe.")
 
 # --- FUNÇÃO HTML IMPRESSÃO ---
 def gerar_html_ficha(dados, is_report=False):
