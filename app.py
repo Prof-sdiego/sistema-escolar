@@ -16,7 +16,7 @@ st.markdown(hide_menu, unsafe_allow_html=True)
 # --- CONFIGURAÇÃO IA GEMINI ---
 try:
     genai.configure(api_key=st.secrets["gemini_key"])
-    modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
+    modelo_ia = genai.GenerativeModel('gemini-pro')
 except:
     st.error("Falta configurar a 'gemini_key' nos Secrets do Streamlit.")
 
@@ -86,7 +86,7 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- CÉREBRO IA (MODO DEPURAÇÃO) ---
+# --- CÉREBRO IA (VERSÃO FINAL - GEMINI PRO) ---
 def consultar_ia(descricao, turma):
     prompt = f"""
     Atue como um coordenador pedagógico experiente. Analise a seguinte ocorrência escolar:
@@ -98,11 +98,9 @@ def consultar_ia(descricao, turma):
     AÇÃO: [Sua sugestão de intervenção curta e objetiva]
     """
     try:
-        # Tenta gerar
         response = modelo_ia.generate_content(prompt)
         texto = response.text
         
-        # Separa gravidade e ação
         gravidade = "Média"
         acao = texto
         if "GRAVIDADE:" in texto:
@@ -112,9 +110,9 @@ def consultar_ia(descricao, turma):
         return gravidade, acao
         
     except Exception as e:
-        # AQUI ESTÁ A MUDANÇA: Ele vai mostrar o erro técnico na tela
-        return "Erro Técnico", f"O Google retornou este erro: {e}"
-
+        # Em caso de erro, devolve algo seguro para não travar o sistema
+        return "Análise Pendente", "Não foi possível contatar a IA. Verifique a conexão."
+        
 # --- ESTADOS DA SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
 if 'prof_nome' not in st.session_state: st.session_state.prof_nome = ""
