@@ -24,8 +24,22 @@ def conectar():
 # --- FUNÇÕES DE DADOS ---
 def carregar_dados(aba_nome):
     try:
-        return pd.DataFrame(conectar().worksheet(aba_nome).get_all_records())
-    except:
+        sheet = conectar().worksheet(aba_nome)
+        dados = sheet.get_all_records()
+        df = pd.DataFrame(dados)
+        
+        # CORREÇÃO DE ERRO: Se a planilha estiver vazia (sem dados na linha 2),
+        # o DataFrame vem sem colunas. Aqui forçamos as colunas a existirem.
+        if df.empty:
+            if aba_nome == "Alertas":
+                return pd.DataFrame(columns=["Data", "Turma", "Professor", "Status"])
+            elif "Página1" in aba_nome: # Ocorrências
+                return pd.DataFrame(columns=["Data", "Aluno", "Turma", "Professor", "Descricao", "Acao_Sugerida", "Intervencao"])
+            elif "Professores" in aba_nome:
+                return pd.DataFrame(columns=["Nome", "Codigo"])
+                
+        return df
+    except Exception as e:
         return pd.DataFrame()
 
 def salvar_ocorrencia(alunos, turma, prof, desc, acao, intervencao=""):
