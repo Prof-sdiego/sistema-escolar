@@ -13,7 +13,7 @@ st.set_page_config(page_title="Sistema Escolar AI", layout="wide")
 hide_menu = """<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>"""
 st.markdown(hide_menu, unsafe_allow_html=True)
 
-# --- CONEXÃO BANCO DE DADOS (CACHE) ---
+# --- CONEXÃO (CACHE) ---
 @st.cache_resource
 def conectar():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -21,54 +21,7 @@ def conectar():
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- INTEGRAÇÃO IA (AUTO-DETECÇÃO DE MODELO) ---
-@st.cache_resource
-def configurar_ia_automatica():
-    try:
-        genai.configure(api_key=st.secrets["gemini_key"])
-        
-        # 1. Pede a lista de modelos disponíveis HOJE
-        todos_modelos = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                todos_modelos.append(m.name)
-        
-        # 2. Estratégia de Escolha (Prioridade para Flash atualizado)
-        modelo_escolhido = None
-        
-        # Tentativa 1: Procurar versões Flash atualizadas (ex: gemini-1.5-flash-002)
-        for m in todos_modelos:
-            if "flash" in m and "002" in m:
-                modelo_escolhido = m
-                break
-        
-        # Tentativa 2: Se não achar, qualquer Flash (ex: gemini-2.0-flash)
-        if not modelo_escolhido:
-            for m in todos_modelos:
-                if "flash" in m:
-                    modelo_escolhido = m
-                    break
-                    
-        # Tentativa 3: Qualquer modelo Gemini Pro atualizado
-        if not modelo_escolhido:
-            for m in todos_modelos:
-                if "gemini" in m and "002" in m:
-                    modelo_escolhido = m
-                    break
-
-        # Tentativa 4: O primeiro que aparecer (Desespero)
-        if not modelo_escolhido and todos_modelos:
-            modelo_escolhido = todos_modelos[0]
-            
-        return modelo_escolhido, todos_modelos
-        
-    except Exception as e:
-        return None, str(e)
-
-# Inicializa a IA e descobre o nome do modelo
-nome_modelo_ativo, lista_debug = configurar_ia_automatica()
-
-# --- FUNÇÕES DE LEITURA ---
+# --- FUNÇÕES DE DADOS ---
 def carregar_alertas(): 
     try:
         sheet = conectar().worksheet("Alertas")
@@ -97,7 +50,7 @@ def carregar_professores():
     except:
         return pd.DataFrame()
 
-# --- FUNÇÕES DE ESCRITA ---
+# --- ESCRITA ---
 def limpar_cache():
     st.cache_data.clear()
 
@@ -146,39 +99,51 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- CONSULTA IA (COM O MODELO DESCOBERTO) ---
+# --- CÉREBRO IA (TENTATIVA MÚLTIPLA) ---
 def consultar_ia(descricao, turma):
-    if not nome_modelo_ativo: return "Erro Config", f"Nenhum modelo encontrado. Lista: {lista_debug}"
-    
+    # Configura a chave sempre que chama
+    try:
+        genai.configure(api_key=st.secrets["gemini_key"])
+    except:
+        return "Erro Config", "Chave API inválida"
+
     prompt = f"""Atue como coordenador pedagógico. Ocorrência: Turma {turma}, Descrição: "{descricao}".
     Responda formato exato: GRAVIDADE: [Alta/Média/Baixa] AÇÃO: [Sugestão curta]"""
+
+    # Configurações de segurança (Liberar Faca/Violência)
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
+    # LISTA DE MODELOS PARA TENTAR (EM ORDEM)
+    # Se um falhar, tenta o próximo imediatamente.
+    modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
     
-    try:
-        # Libera filtros de segurança para contexto escolar
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        
-        # Usa o modelo que descobrimos automaticamente
-        modelo = genai.GenerativeModel(nome_modelo_ativo)
-        response = modelo.generate_content(prompt, safety_settings=safety_settings)
-        texto = response.text
-        
-        grav, acao = "Média", texto
-        if "GRAVIDADE:" in texto:
-            partes = texto.split("AÇÃO:")
-            grav = partes[0].replace("GRAVIDADE:", "").strip()
-            acao = partes[1].strip() if len(partes) > 1 else texto
-        return grav, acao
-        
-    except Exception as e:
-        # Erro de cota (429) é comum em modelos muito novos ou experimentais
-        if "429" in str(e):
-            return "Erro Cota", "Muitos pedidos. Aguarde 1 minuto."
-        return "Erro IA", f"Modelo {nome_modelo_ativo} falhou: {e}"
+    erros_log = []
+
+    for modelo_nome in modelos:
+        try:
+            modelo = genai.GenerativeModel(modelo_nome)
+            response = modelo.generate_content(prompt, safety_settings=safety_settings)
+            texto = response.text
+            
+            # Sucesso! Formata e devolve
+            grav, acao = "Média", texto
+            if "GRAVIDADE:" in texto:
+                partes = texto.split("AÇÃO:")
+                grav = partes[0].replace("GRAVIDADE:", "").strip()
+                acao = partes[1].strip() if len(partes) > 1 else texto
+            return grav, acao
+            
+        except Exception as e:
+            erros_log.append(f"{modelo_nome}: {str(e)}")
+            continue # Tenta o próximo da lista
+
+    # Se chegou aqui, todos falharam
+    return "Erro IA", f"Falha geral. Detalhes: {erros_log}"
 
 # --- SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
@@ -240,13 +205,22 @@ if menu == "Acesso Professor":
             if st.button("Limpar"): st.session_state.lista_alunos = []; st.rerun()
         
         desc = st.text_area("Descrição")
+        
+        # BOTÃO ANALISAR E SALVAR
         if st.button("🤖 Analisar e Salvar"):
             if st.session_state.lista_alunos and desc:
                 with st.spinner("IA Analisando..."):
+                    # Chama a função que tenta 3 modelos
                     g, a = consultar_ia(desc, t_oc)
-                    salvar_ocorrencia(st.session_state.lista_alunos, t_oc, st.session_state.prof_nome, desc, a)
-                st.success(f"Salvo! Gravidade: {g}")
-                st.session_state.lista_alunos = []; time.sleep(2); st.rerun()
+                    
+                    # Se salvou com sucesso
+                    if salvar_ocorrencia(st.session_state.lista_alunos, t_oc, st.session_state.prof_nome, desc, a):
+                        st.success(f"Salvo! Gravidade: {g}")
+                        st.session_state.lista_alunos = [] # Limpa lista
+                        time.sleep(2)
+                        st.rerun()
+            else:
+                st.warning("Preencha todos os campos!")
 
 # === GESTÃO ===
 elif menu == "Painel Gestão":
@@ -272,24 +246,21 @@ elif menu == "Painel Gestão":
     tab1, tab2, tab3, tab4 = st.tabs(["🔥 Tempo Real", "📝 Registrar", "🏫 Histórico", "⚙️ Admin"])
     
     with tab1:
-        if nome_modelo_ativo:
-            st.caption(f"🤖 Modelo IA em uso: {nome_modelo_ativo}")
-        else:
-            st.error("⚠️ Nenhuma IA encontrada! Verifique se a API Key tem permissões.")
-
         df = carregar_ocorrencias_cache()
         if not df.empty and 'Status_Gestao' in df.columns:
             pend = df[df['Status_Gestao'] != "Arquivado"]
             if pend.empty: st.success("Sem pendências.")
             for idx, row in pend.iloc[::-1].iterrows():
                 cor = "#fff3cd"
-                if "Alta" in str(row.get('Acao_Sugerida')): cor = "#f8d7da"
-                elif "Baixa" in str(row.get('Acao_Sugerida')): cor = "#d4edda"
+                sugestao = str(row.get('Acao_Sugerida', ''))
+                if "Alta" in sugestao: cor = "#f8d7da"
+                elif "Baixa" in sugestao: cor = "#d4edda"
+                elif "Erro" in sugestao: cor = "#e2e3e5" # Cinza para erros
                 
                 with st.container():
                     st.markdown(f"""<div style='background:{cor};padding:15px;border-radius:10px;margin-bottom:10px'>
                     <b>{row['Aluno']}</b> ({row['Turma']})<br><i>"{row['Descricao']}"</i><br>
-                    <small>IA: {row.get('Acao_Sugerida')}</small></div>""", unsafe_allow_html=True)
+                    <small>IA: {sugestao}</small></div>""", unsafe_allow_html=True)
                     
                     c1, c2, c3 = st.columns([1,2,1])
                     if c1.button("✅ Ok", key=f"ok{idx}"): atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado"); st.rerun()
