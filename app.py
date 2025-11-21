@@ -13,14 +13,14 @@ st.set_page_config(page_title="Sistema Escolar AI", layout="wide")
 hide_menu = """<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>"""
 st.markdown(hide_menu, unsafe_allow_html=True)
 
-# --- CONFIGURAÇÃO IA GEMINI ---
+# --- CONFIGURAÇÃO IA (LISTA DE TENTATIVAS) ---
+# O sistema vai tentar configurar a chave, mas a escolha do modelo será feita na hora da consulta
 try:
     genai.configure(api_key=st.secrets["gemini_key"])
-    # MUDANÇA AQUI: Usando o modelo mais recente e estável
-    modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
+    ia_ativa = True
 except Exception as e:
     st.error(f"Erro Config IA: {e}")
-    modelo_ia = None
+    ia_ativa = False
 
 # --- CONEXÃO (CACHE RESOURCE) ---
 @st.cache_resource
@@ -31,7 +31,6 @@ def conectar():
     return client.open("Dados_Escolares")
 
 # --- LEITURA INTELIGENTE ---
-
 def carregar_alertas(): 
     try:
         sheet = conectar().worksheet("Alertas")
@@ -60,7 +59,7 @@ def carregar_professores():
     except:
         return pd.DataFrame()
 
-# --- ESCRITA (LIMPA CACHE) ---
+# --- ESCRITA ---
 def limpar_cache():
     st.cache_data.clear()
 
@@ -109,33 +108,47 @@ def atualizar_alerta_status(turma, novo_status):
             sheet.update_cell(i + 2, 4, novo_status)
             break
 
-# --- IA (GEMINI 1.5 FLASH + SEGURANÇA LIBERADA) ---
+# --- IA ROBUSTA (TENTA VÁRIOS MODELOS) ---
 def consultar_ia(descricao, turma):
-    if modelo_ia is None: return "Erro Config", "IA Off"
+    if not ia_ativa: return "Erro Config", "IA Off"
     
     prompt = f"""Atue como coordenador pedagógico. Ocorrência: Turma {turma}, Descrição: "{descricao}".
     Responda formato exato: GRAVIDADE: [Alta/Média/Baixa] AÇÃO: [Sugestão curta]"""
     
-    try:
-        # Configurações para permitir conteúdo sobre violência escolar (necessário para gestão)
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        
-        response = modelo_ia.generate_content(prompt, safety_settings=safety_settings)
-        texto = response.text
-        
-        grav, acao = "Média", texto
-        if "GRAVIDADE:" in texto:
-            partes = texto.split("AÇÃO:")
-            grav = partes[0].replace("GRAVIDADE:", "").strip()
-            acao = partes[1].strip() if len(partes) > 1 else texto
-        return grav, acao
-    except Exception as e:
-        return "Erro IA", f"Detalhe: {e}"
+    # Configurações para permitir violência escolar
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
+    # Lista de modelos para tentar (do mais novo para o mais velho)
+    modelos_para_tentar = ["gemini-1.5-flash", "gemini-pro", "gemini-1.0-pro"]
+    
+    ultimo_erro = ""
+    
+    for modelo_nome in modelos_para_tentar:
+        try:
+            modelo = genai.GenerativeModel(modelo_nome)
+            response = modelo.generate_content(prompt, safety_settings=safety_settings)
+            texto = response.text
+            
+            # Se chegou aqui, funcionou! Processa e retorna.
+            grav, acao = "Média", texto
+            if "GRAVIDADE:" in texto:
+                partes = texto.split("AÇÃO:")
+                grav = partes[0].replace("GRAVIDADE:", "").strip()
+                acao = partes[1].strip() if len(partes) > 1 else texto
+            return grav, acao
+            
+        except Exception as e:
+            # Se falhar, tenta o próximo modelo da lista
+            ultimo_erro = str(e)
+            continue
+    
+    # Se todos falharem:
+    return "Erro IA", f"Falha em todos os modelos. Último erro: {ultimo_erro}"
 
 # --- SESSÃO ---
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
