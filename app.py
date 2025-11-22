@@ -8,12 +8,11 @@ import time
 from streamlit_autorefresh import st_autorefresh
 import google.generativeai as genai
 from fpdf import FPDF
-import io
 
 # --- CONFIGURAÇÕES GERAIS ---
 st.set_page_config(page_title="Ocorrência Digital", layout="wide", page_icon="🏫")
 
-# CSS para esconder menus do Streamlit
+# CSS
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;} 
@@ -22,110 +21,79 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- SOM INTELIGENTE (TOCA UMA ÚNICA VEZ) ---
+# --- SOM ---
 def gerenciar_som(tipo="normal", chave_evento=None):
-    """
-    Só toca o som se este evento específico ainda não tiver tocado.
-    """
-    if 'sons_tocados' not in st.session_state:
-        st.session_state.sons_tocados = set()
-    
-    # Se já tocou este evento, ignora
-    if chave_evento in st.session_state.sons_tocados:
-        return
+    if 'sons_tocados' not in st.session_state: st.session_state.sons_tocados = set()
+    if chave_evento in st.session_state.sons_tocados: return
 
-    # Se não tocou, toca e registra
     sound_url = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
-    if tipo == "grave": 
-        sound_url = "https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3"
+    if tipo == "grave": sound_url = "https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3"
     
     st.markdown(f"""<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>""", unsafe_allow_html=True)
-    
-    if chave_evento:
-        st.session_state.sons_tocados.add(chave_evento)
+    if chave_evento: st.session_state.sons_tocados.add(chave_evento)
 
-# --- GERADOR DE PDF (FPDF) ---
+# --- GERADOR DE PDF (PROFISSIONAL E EM LOTE) ---
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 16)
         self.cell(0, 10, 'OCORRÊNCIA DIGITAL - RELATÓRIO ESCOLAR', 0, 1, 'C')
         self.ln(5)
-        self.line(10, 25, 200, 25) # Linha horizontal
+        self.line(10, 25, 200, 25)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
-def criar_pdf_ocorrencia(dados):
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    
-    # Tratamento de caracteres especiais (latin-1 para compatibilidade simples)
+def desenhar_pagina_ocorrencia(pdf, dados):
+    """Desenha o conteúdo de UMA ocorrência na página atual do PDF"""
     def limpa(texto):
         return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
-    # Cabeçalho dos Dados
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(30, 10, "Aluno:", 0, 0)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(100, 10, limpa(dados['Aluno']), 0, 0)
+    pdf.set_font("Arial", size=12)
     
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(20, 10, "Turma:", 0, 0)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, limpa(dados['Turma']), 0, 1)
+    # Dados do Cabeçalho
+    pdf.set_font("Arial", 'B', 12); pdf.cell(30, 10, "Aluno:", 0, 0)
+    pdf.set_font("Arial", '', 12); pdf.cell(100, 10, limpa(dados['Aluno']), 0, 0)
     
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(30, 10, "Data/Hora:", 0, 0)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, limpa(dados['Data']), 0, 1)
+    pdf.set_font("Arial", 'B', 12); pdf.cell(20, 10, "Turma:", 0, 0)
+    pdf.set_font("Arial", '', 12); pdf.cell(0, 10, limpa(dados['Turma']), 0, 1)
     
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(30, 10, "Professor:", 0, 0)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, limpa(dados['Professor']), 0, 1)
+    pdf.set_font("Arial", 'B', 12); pdf.cell(30, 10, "Data:", 0, 0)
+    pdf.set_font("Arial", '', 12); pdf.cell(0, 10, limpa(dados['Data']), 0, 1)
     
-    pdf.ln(5)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(5)
+    pdf.set_font("Arial", 'B', 12); pdf.cell(30, 10, "Professor:", 0, 0)
+    pdf.set_font("Arial", '', 12); pdf.cell(0, 10, limpa(dados['Professor']), 0, 1)
     
-    # Descrição
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, limpa("DESCRIÇÃO DOS FATOS:"), 0, 1)
+    pdf.ln(5); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(10)
+    
+    # Conteúdo
+    pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa("DESCRIÇÃO DOS FATOS:"), 0, 1)
+    pdf.set_font("Arial", '', 11); pdf.multi_cell(0, 6, limpa(dados['Descricao']))
+    pdf.ln(10)
+    
+    pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa("INTERVENÇÃO DA GESTÃO:"), 0, 1)
     pdf.set_font("Arial", '', 11)
-    pdf.multi_cell(0, 6, limpa(dados['Descricao']))
-    pdf.ln(5)
-    
-    # Intervenção
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, limpa("INTERVENÇÃO / ENCAMINHAMENTO DA GESTÃO:"), 0, 1)
-    pdf.set_font("Arial", '', 11)
-    interv = dados.get('Intervencao', 'Nenhuma intervenção registrada.')
+    interv = dados.get('Intervencao', '') or "Sem registro."
     pdf.multi_cell(0, 6, limpa(interv))
     
-    # Assinaturas (Fixo no final da página ou após conteúdo)
-    y_ass = 230 # Posição vertical fixa para assinaturas
-    if pdf.get_y() > 210: 
-        pdf.add_page()
-        y_ass = 230
-        
-    pdf.set_y(y_ass)
-    
+    # Assinaturas (Sempre no final da página)
+    pdf.set_y(-50) 
     pdf.set_font("Arial", '', 10)
+    y = pdf.get_y()
     
-    # Linhas de assinatura
-    y_linha = y_ass
-    pdf.line(20, y_linha, 90, y_linha)   # Aluno
-    pdf.line(120, y_linha, 190, y_linha) # Responsável
+    pdf.line(20, y, 80, y); pdf.line(110, y, 190, y)
+    pdf.text(35, y + 5, limpa("Aluno(a)")); pdf.text(135, y + 5, limpa("Responsável"))
     
-    pdf.text(40, y_linha + 5, limpa("Assinatura do Aluno(a)"))
-    pdf.text(135, y_linha + 5, limpa("Assinatura do Responsável"))
-    
-    pdf.line(70, y_linha + 30, 140, y_linha + 30) # Gestão
-    pdf.text(90, y_linha + 35, limpa("Carimbo/Ass. Gestão Escolar"))
+    pdf.line(65, y + 25, 145, y + 25)
+    pdf.text(90, y + 30, limpa("Gestão Escolar"))
 
+def gerar_pdf_lote(dataframe_filtrado):
+    """Gera um único PDF com várias páginas (uma por ocorrência)"""
+    pdf = PDF()
+    for index, row in dataframe_filtrado.iterrows():
+        pdf.add_page()
+        desenhar_pagina_ocorrencia(pdf, row.to_dict())
     return pdf.output(dest='S').encode('latin-1')
 
 # --- CONEXÃO ---
@@ -136,7 +104,7 @@ def conectar():
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- IA ---
+# --- IA (AUTO-DETECÇÃO) ---
 @st.cache_resource
 def configurar_ia_automatica():
     try:
@@ -255,15 +223,13 @@ def consultar_ia(descricao, turma):
 if 'panico_mode' not in st.session_state: st.session_state.panico_mode = False
 if 'id_intervencao_ativa' not in st.session_state: st.session_state.id_intervencao_ativa = None
 if 'total_ocorrencias' not in st.session_state: st.session_state.total_ocorrencias = 0
+if 'pdf_buffer' not in st.session_state: st.session_state.pdf_buffer = None
 
-# Login Persistente
 params = st.query_params
-if "prof_logado" in params:
-    st.session_state.prof_logado = True; st.session_state.prof_nome = params["prof_nome"]
+if "prof_logado" in params: st.session_state.prof_logado = True; st.session_state.prof_nome = params["prof_nome"]
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
 
-if "gestao_logada" in params:
-    st.session_state.gestao_logada = True; st.session_state.gestao_nome = params["gestao_nome"]
+if "gestao_logada" in params: st.session_state.gestao_logada = True; st.session_state.gestao_nome = params["gestao_nome"]
 if 'gestao_logada' not in st.session_state: st.session_state.gestao_logada = False
 
 # --- INTERFACE ---
@@ -287,8 +253,7 @@ if menu == "Acesso Professor":
     else:
         col_h1, col_h2 = st.columns([4,1])
         col_h1.success(f"👤 Prof. **{st.session_state.prof_nome}**")
-        if col_h2.button("Sair"):
-            st.session_state.prof_logado = False; st.query_params.clear(); st.rerun()
+        if col_h2.button("Sair"): st.session_state.prof_logado = False; st.query_params.clear(); st.rerun()
 
         tab_reg, tab_hist = st.tabs(["📝 Nova Ocorrência", "🗂️ Meus Registros"])
 
@@ -334,7 +299,6 @@ if menu == "Acesso Professor":
 
 # ================= GESTÃO =================
 elif menu == "Painel Gestão":
-    
     if not st.session_state.gestao_logada:
         with st.form("login_gestao"):
             st.write("### 📊 Acesso Gestão")
@@ -345,7 +309,6 @@ elif menu == "Painel Gestão":
                 if not df_g.empty:
                     df_g['Codigo'] = df_g['Codigo'].astype(str)
                     if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty: login_ok = True
-                
                 if login_ok:
                     st.session_state.gestao_logada = True; st.session_state.gestao_nome = gn
                     st.query_params["gestao_logada"] = "true"; st.query_params["gestao_nome"] = gn; st.rerun()
@@ -359,15 +322,12 @@ elif menu == "Painel Gestão":
         if st.session_state.id_intervencao_ativa is None: st_autorefresh(interval=15000, key="gestaorefresh")
         else: st.info("⏸️ Atualização pausada para edição.")
 
-        # 1. ALERTAS
         df_alertas = carregar_alertas()
         if not df_alertas.empty:
             pendentes = df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])]
             for i, row in pendentes.iterrows():
                 st.error(f"🚨 URGENTE: Sala {row['Turma']} ({row['Professor']})")
-                if row['Status'] == "Pendente": 
-                    gerenciar_som("grave", f"panico_{row['Data']}_{row['Turma']}")
-                
+                if row['Status'] == "Pendente": gerenciar_som("grave", f"alert_{row['Data']}_{row['Turma']}")
                 c1, c2 = st.columns(2)
                 if row['Status'] == "Pendente":
                     if c1.button("👀 A Caminho", key=f"v{i}"): atualizar_alerta_status(row['Turma'], "Em Atendimento"); st.rerun()
@@ -379,15 +339,12 @@ elif menu == "Painel Gestão":
 
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔥 Tempo Real", "📝 Registrar", "🏫 Histórico", "🖨️ Relatórios", "⚙️ Admin"])
         
-        # Aba 1: Tempo Real
         with tab1:
             df_oc = carregar_ocorrencias_cache()
             qtd_atual = len(df_oc)
-            # Toca som apenas se aumentou a quantidade
             if qtd_atual > st.session_state.total_ocorrencias:
-                gerenciar_som("normal", f"nova_oc_{datetime.now()}")
-                st.toast("🔔 Nova Ocorrência!", icon="📢")
-                st.session_state.total_ocorrencias = qtd_atual
+                gerenciar_som("normal", f"novas_oc_{qtd_atual}")
+                st.toast("🔔 Nova Ocorrência!", icon="📢"); st.session_state.total_ocorrencias = qtd_atual
 
             if not df_oc.empty and 'Status_Gestao' in df_oc.columns:
                 contagem = df_oc['Aluno'].value_counts()
@@ -397,10 +354,7 @@ elif menu == "Painel Gestão":
                 for idx, row in pend.iloc[::-1].iterrows():
                     sugestao = str(row.get('Acao_Sugerida', ''))
                     cor, borda = "#fff3cd", "orange"
-                    if "Alta" in sugestao: 
-                        cor, borda = "#ffe6e6", "red"
-                        # Som grave se for alta gravidade e pendente
-                        gerenciar_som("grave", f"grave_{row['Data']}_{row['Aluno']}")
+                    if "Alta" in sugestao: cor, borda = "#ffe6e6", "red"
                     elif "Baixa" in sugestao: cor, borda = "#e6fffa", "green"
 
                     qtd = contagem.get(row['Aluno'], 1)
@@ -415,25 +369,18 @@ elif menu == "Painel Gestão":
                             st.markdown(f"**Intervenção para {row['Aluno']}:**")
                             txt = st.text_area("Ação:", key=f"tx{idx}", height=100)
                             c_s, c_c = st.columns(2)
-                            
-                            if c_s.button("💾 Salvar", key=f"sv{idx}"):
+                            if c_s.button("💾 Salvar e Gerar PDF", key=f"sv{idx}"):
                                 atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", txt)
-                                # Cria PDF para download
+                                # Gera PDF Único
                                 d_imp = row.to_dict(); d_imp['Intervencao'] = txt
-                                pdf_bytes = criar_pdf_ocorrencia(d_imp)
-                                st.session_state.pdf_pronto = pdf_bytes
-                                st.session_state.id_intervencao_ativa = None
-                                st.rerun()
-                                
+                                st.session_state.pdf_buffer = gerar_pdf_lote(pd.DataFrame([d_imp]))
+                                st.session_state.id_intervencao_ativa = None; st.rerun()
                             if c_c.button("Cancelar", key=f"can{idx}"): st.session_state.id_intervencao_ativa = None; st.rerun()
                         else:
-                            # Se acabou de gerar um PDF, mostra o botão de download
-                            if 'pdf_pronto' in st.session_state and st.session_state.pdf_pronto:
-                                st.success("✅ Intervenção Salva!")
-                                st.download_button(label="📥 BAIXAR FICHA PDF", data=st.session_state.pdf_pronto, file_name="Ficha_Ocorrencia.pdf", mime="application/pdf")
-                                if st.button("Fechar e Voltar"):
-                                    del st.session_state.pdf_pronto; st.rerun()
-                            
+                            if 'pdf_buffer' in st.session_state and st.session_state.pdf_buffer:
+                                st.success("PDF Gerado!")
+                                st.download_button("📥 Baixar PDF da Ocorrência", data=st.session_state.pdf_buffer, file_name="Ocorrencia.pdf", mime="application/pdf")
+                                if st.button("Fechar"): st.session_state.pdf_buffer = None; st.rerun()
                             elif st.session_state.id_intervencao_ativa is None:
                                 c1, c2, c3 = st.columns([1,3,1])
                                 if c1.button("✅ Visto", key=f"ok{idx}"): atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", "Visto"); st.rerun()
@@ -454,36 +401,22 @@ elif menu == "Painel Gestão":
                 st.dataframe(df_oc[df_oc['Turma'] == t])
         
         with tab4: # Relatórios
-            st.header("🖨️ Relatórios PDF")
-            tr = st.radio("Tipo:", ["Aluno Específico", "Turma Completa"])
+            st.header("🖨️ Central de Relatórios (PDF)")
+            tr = st.radio("Modo de Impressão:", ["Por Aluno (Individual)", "Turma Completa (Lote)"])
             if not df_oc.empty:
-                ts = st.selectbox("Turma:", sorted(df_oc['Turma'].astype(str).unique()), key="relt")
+                ts = st.selectbox("Selecione a Turma:", sorted(df_oc['Turma'].astype(str).unique()), key="relt")
                 dft = df_oc[df_oc['Turma'] == ts]
                 
-                if tr == "Aluno Específico":
-                    al = st.selectbox("Aluno:", sorted(dft['Aluno'].unique()))
+                if tr == "Por Aluno (Individual)":
+                    al = st.selectbox("Selecione o Aluno:", sorted(dft['Aluno'].unique()))
                     if st.button("Gerar PDF do Aluno"):
                         df_aluno = dft[dft['Aluno'] == al]
-                        
-                        # Cria PDF com múltiplas páginas
-                        pdf = PDF()
-                        for _, row in df_aluno.iterrows():
-                            # Logica interna para adicionar páginas
-                            pdf.add_page()
-                            pdf.set_font("Arial", size=12)
-                            # ... (reutiliza lógica do criar_pdf ou simplifica)
-                            # Aqui vou chamar a função existente mas manipular o objeto
-                            # Simplificação: Gerar ZIP ou único PDF. Vamos fazer único PDF.
-                            # Para simplificar, usamos a função base e concatenamos bytes? Não.
-                            # Melhor: Loop manual aqui.
-                            pass 
-                        
-                        # Como FPDF é chato de concatenar, vamos gerar APENAS o último ou refazer a lógica.
-                        # SOLUÇÃO RÁPIDA: Gerar apenas a ficha individual por enquanto ou baixar 1 por 1.
-                        # Vamos fazer: Gera PDF da ÚLTIMA ocorrência (demo)
-                        st.info("Funcionalidade de lote em desenvolvimento. Baixe individualmente no Histórico.")
+                        pdf_bytes = gerar_pdf_lote(df_aluno)
+                        st.download_button("📥 Baixar PDF Completo", data=pdf_bytes, file_name=f"Relatorio_{al}.pdf", mime="application/pdf")
                 else:
-                    st.info("Para relatórios em lote, use o Histórico.")
+                    if st.button(f"Gerar PDF da Turma ({len(dft)} ocorrências)"):
+                        pdf_bytes = gerar_pdf_lote(dft)
+                        st.download_button("📥 Baixar PDF da Turma", data=pdf_bytes, file_name=f"Relatorio_{ts}.pdf", mime="application/pdf")
 
         with tab5: # Admin
             st.write("### Cadastrar Usuários")
