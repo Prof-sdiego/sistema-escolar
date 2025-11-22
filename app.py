@@ -15,132 +15,54 @@ import urllib.parse
 st.set_page_config(page_title="EduGestor AI", layout="wide", page_icon="🎓")
 
 # ==============================================================================
-#  🎨 CSS PERSONALIZADO (VISUAL EDUGESTOR)
+#  🎨 CSS ISOLADO (CORREÇÃO DO ERRO TOKEN ERROR)
 # ==============================================================================
-st.markdown("""
+EDU_STYLE = """
 <style>
-    /* Importando Fonte Moderna (Inter) */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-
-    /* Fundo Geral */
-    .stApp {
-        background-color: #F3F4F6; /* Cinza muito claro */
-    }
-
-    /* Esconder Menu Padrão */
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    .stApp { background-color: #F3F4F6; }
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;} 
     header {visibility: hidden;}
-
-    /* --- SIDEBAR --- */
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF;
-        border-right: 1px solid #E5E7EB;
-    }
+    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
     
-    /* --- CARTÕES (White Cards) --- */
     .card {
-        background-color: white;
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-        margin-bottom: 20px;
-        border: 1px solid #F3F4F6;
+        background-color: white; border-radius: 12px; padding: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 20px; border: 1px solid #F3F4F6;
     }
-
-    /* --- MÉTRICAS (TOPO) --- */
-    .metric-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .metric-label {
-        font-size: 0.9rem;
-        color: #6B7280;
-        font-weight: 600;
-    }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #111827;
-    }
+    .metric-container { display: flex; justify-content: space-between; align-items: center; }
+    .metric-label { font-size: 0.9rem; color: #6B7280; font-weight: 600; }
+    .metric-value { font-size: 1.8rem; font-weight: 700; color: #111827; }
     .metric-icon {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.2rem;
+        width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
     }
     .icon-blue { background-color: #DBEAFE; color: #2563EB; }
     .icon-red { background-color: #FEE2E2; color: #DC2626; }
     .icon-purple { background-color: #EDE9FE; color: #7C3AED; }
 
-    /* --- CARD ROXO IA --- */
     .ai-card {
         background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-        border-radius: 16px;
-        padding: 25px;
-        color: white;
-        margin-bottom: 20px;
-        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
-        position: relative;
-        overflow: hidden;
+        border-radius: 16px; padding: 25px; color: white; margin-bottom: 20px;
+        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4); position: relative; overflow: hidden;
     }
     .ai-card h3 { color: white !important; margin: 0 0 10px 0; }
     .ai-card p { color: #E0E7FF; font-size: 0.9rem; }
     
-    /* --- BADGES (Leve/Grave) --- */
-    .badge {
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
+    .badge { padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
     .badge-leve { background-color: #D1FAE5; color: #065F46; }
     .badge-media { background-color: #FEF3C7; color: #92400E; }
     .badge-grave { background-color: #FEE2E2; color: #991B1B; }
 
-    /* --- BOTÕES --- */
-    div.stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
-        border: none;
-        padding: 0.5rem 1rem;
-        transition: all 0.2s;
-    }
-    /* Botão Primário (Roxo) */
-    div.stButton > button[kind="primary"] {
-        background-color: #4F46E5;
-        color: white;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #4338CA;
-        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
-    }
+    div.stButton > button { border-radius: 8px; font-weight: 600; border: none; padding: 0.5rem 1rem; transition: all 0.2s; }
+    div.stButton > button[kind="primary"] { background-color: #4F46E5; color: white; }
+    div.stButton > button[kind="primary"]:hover { background-color: #4338CA; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
     
-    /* Avatar do Aluno */
     .avatar {
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        background-color: #E0E7FF;
-        color: #4F46E5;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-        font-size: 1.2rem;
-        margin-right: 15px;
+        width: 48px; height: 48px; border-radius: 50%; background-color: #E0E7FF; color: #4F46E5;
+        display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; margin-right: 15px;
     }
     
-    /* Impressão */
     @media print {
         @page { size: A4; margin: 0; }
         body * { visibility: hidden; }
@@ -148,7 +70,8 @@ st.markdown("""
         .area-impressao { position: absolute; left: 0; top: 0; width: 100%; }
     }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(EDU_STYLE, unsafe_allow_html=True)
 
 # ==============================================================================
 #  LÓGICA (BACKEND)
@@ -403,7 +326,7 @@ if menu == "Acesso Professor":
         tab_reg, tab_hist = st.tabs(["📝 Registrar Ocorrência", "🗂️ Meus Registros"])
 
         with tab_reg:
-            # Botão de Pânico (Discreto mas visível)
+            # Botão de Pânico
             with st.expander("🚨 Botão de Emergência (Clique aqui apenas em caso grave)"):
                 st.warning("Isso enviará um alerta vermelho para a sala da direção.")
                 if st.button("CHAMAR AJUDA AGORA", type="primary"):
@@ -436,7 +359,6 @@ if menu == "Acesso Professor":
                     st.info("Nenhum registro encontrado.")
                 else:
                     for i, row in meus.iloc[::-1].iterrows():
-                        # Estilização do card histórico
                         cor_borda = "#10B981" if row['Status_Gestao'] == "Arquivado" else "#F59E0B"
                         icon_st = "✅ Resolvido" if row['Status_Gestao'] == "Arquivado" else "⏳ Em Análise"
                         
@@ -482,7 +404,7 @@ elif menu == "Painel Gestão":
                         st.query_params["gestao_logada"] = "true"; st.query_params["gestao_nome"] = gn; st.rerun()
                     else: st.error("Acesso negado.")
     else:
-        # HEADER E SAIR
+        # HEADER
         c_head1, c_head2 = st.columns([5,1])
         with c_head1: st.markdown(f"## Painel de Controle")
         with c_head2: 
@@ -495,7 +417,7 @@ elif menu == "Painel Gestão":
         df_oc = carregar_ocorrencias_cache()
         df_alertas = carregar_alertas()
         
-        # --- LINHA DE MÉTRICAS (CARDS) ---
+        # --- MÉTRICAS ---
         total_hoje = 0
         total_bimestre = len(df_oc)
         criticos = 0
@@ -508,29 +430,11 @@ elif menu == "Painel Gestão":
 
         col_m1, col_m2, col_m3 = st.columns(3)
         with col_m1:
-            st.markdown(f"""
-            <div class="card">
-                <div class="metric-container">
-                    <div><div class="metric-label">Ocorrências Hoje</div><div class="metric-value">{total_hoje}</div></div>
-                    <div class="metric-icon icon-blue">📅</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><div class="metric-container"><div><div class="metric-label">Ocorrências Hoje</div><div class="metric-value">{total_hoje}</div></div><div class="metric-icon icon-blue">📅</div></div></div>""", unsafe_allow_html=True)
         with col_m2:
-            st.markdown(f"""
-            <div class="card">
-                <div class="metric-container">
-                    <div><div class="metric-label">Casos Críticos (IA)</div><div class="metric-value">{criticos}</div></div>
-                    <div class="metric-icon icon-red">⚠️</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><div class="metric-container"><div><div class="metric-label">Casos Críticos (IA)</div><div class="metric-value">{criticos}</div></div><div class="metric-icon icon-red">⚠️</div></div></div>""", unsafe_allow_html=True)
         with col_m3:
-            st.markdown(f"""
-            <div class="card">
-                <div class="metric-container">
-                    <div><div class="metric-label">Total Bimestre</div><div class="metric-value">{total_bimestre}</div></div>
-                    <div class="metric-icon icon-purple">📊</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><div class="metric-container"><div><div class="metric-label">Total Bimestre</div><div class="metric-value">{total_bimestre}</div></div><div class="metric-icon icon-purple">📊</div></div></div>""", unsafe_allow_html=True)
 
         # ALERTAS DE PÂNICO
         if not df_alertas.empty:
@@ -547,23 +451,15 @@ elif menu == "Painel Gestão":
                         st.session_state.dados_panico = {"turma": row['Turma'], "prof": row['Professor']}
                         st.session_state.aba_ativa_gestao = "reg"; st.rerun()
 
-        # LAYOUT PRINCIPAL (FEED + SIDEBAR)
+        # LAYOUT
         col_feed, col_sidebar = st.columns([2, 1])
 
         with col_sidebar:
-            # Card Roxo da IA
-            st.markdown("""
-            <div class="ai-card">
-                <h3>🤖 EduGestor AI</h3>
-                <p>A Inteligência Artificial está analisando todas as ocorrências em tempo real para identificar padrões de comportamento e sugerir mediações baseadas no Protocolo 179.</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown("""<div class="ai-card"><h3>🤖 EduGestor AI</h3><p>Monitoramento em tempo real e sugestões baseadas no Protocolo 179.</p></div>""", unsafe_allow_html=True)
             st.markdown("#### Acesso Rápido")
             tab_reg, tab_rel, tab_adm = st.tabs(["📝 Novo", "🖨️ Relatórios", "⚙️ Admin"])
             
             with tab_reg:
-                # Formulário Compacto Lateral
                 with st.form("quick_reg", clear_on_submit=True):
                     tg = st.selectbox("Turma", ["6A","6B","7A","7B","8A","8B","9A","9B"])
                     ag = st.text_input("Aluno")
@@ -597,38 +493,30 @@ elif menu == "Painel Gestão":
 
         with col_feed:
             st.markdown("### 📋 Ocorrências Recentes")
-            
             if qtd_atual := len(df_oc):
                 if qtd_atual > st.session_state.total_ocorrencias:
                     gerenciar_som("normal", f"n{qtd_atual}"); st.toast("🔔 Nova Ocorrência!"); st.session_state.total_ocorrencias = qtd_atual
 
             if not df_oc.empty and 'Status_Gestao' in df_oc.columns:
                 contagem = df_oc['Aluno'].value_counts()
-                # Filtros rápidos (Abas invisíveis, usamos selectbox)
-                filtro_status = st.selectbox("Filtrar por:", ["Pendentes", "Arquivados", "Todos"], label_visibility="collapsed")
+                filtro_status = st.selectbox("Filtrar:", ["Pendentes", "Arquivados", "Todos"], label_visibility="collapsed")
                 
                 if filtro_status == "Pendentes": df_show = df_oc[df_oc['Status_Gestao'] != "Arquivado"]
                 elif filtro_status == "Arquivados": df_show = df_oc[df_oc['Status_Gestao'] == "Arquivado"]
                 else: df_show = df_oc
 
-                if df_show.empty: st.info("Nenhum registro neste filtro.")
+                if df_show.empty: st.info("Nenhum registro.")
                 
                 for idx, row in df_show.iloc[::-1].iterrows():
-                    # Lógica Visual
                     sugestao = str(row.get('Acao_Sugerida', ''))
-                    badge_class = "badge-media"
-                    badge_text = "MÉDIA"
-                    
+                    badge_class = "badge-media"; badge_text = "MÉDIA"
                     if "Alta" in sugestao: 
                         badge_class = "badge-grave"; badge_text = "GRAVE"
                         if row['Status_Gestao'] != "Arquivado": gerenciar_som("grave", f"g{row['Data']}{row['Aluno']}")
-                    elif "Baixa" in sugestao: 
-                        badge_class = "badge-leve"; badge_text = "LEVE"
+                    elif "Baixa" in sugestao: badge_class = "badge-leve"; badge_text = "LEVE"
 
-                    # Avatar com Iniciais
                     iniciais = row['Aluno'][:2].upper() if row['Aluno'] else "??"
                     
-                    # Whats
                     link_whats = None
                     df_c = carregar_alunos_contatos()
                     if not df_c.empty:
@@ -637,30 +525,20 @@ elif menu == "Painel Gestão":
                             msg = gerar_mensagem_whats(row['Aluno'], contato.iloc[0]['Responsavel'], row['Descricao'], row.get('Intervencao', 'Em análise'))
                             link_whats = f"https://wa.me/{contato.iloc[0]['Telefone']}?text={urllib.parse.quote(msg)}"
 
-                    # --- CARD VISUAL ---
                     st.markdown(f"""
                     <div class="card">
                         <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:10px;">
                             <div style="display:flex; align-items:center;">
                                 <div class="avatar">{iniciais}</div>
-                                <div>
-                                    <div style="font-weight:bold; font-size:1.1rem; color:#1F2937;">{row['Aluno']}</div>
-                                    <div style="font-size:0.85rem; color:#6B7280;">{row['Data']} • {row['Turma']}</div>
-                                </div>
+                                <div><div style="font-weight:bold; font-size:1.1rem; color:#1F2937;">{row['Aluno']}</div><div style="font-size:0.85rem; color:#6B7280;">{row['Data']} • {row['Turma']}</div></div>
                             </div>
                             <span class="badge {badge_class}">{badge_text}</span>
                         </div>
-                        <div style="background:#F9FAFB; padding:15px; border-radius:8px; color:#4B5563; font-size:0.95rem; margin-bottom:15px;">
-                            {row['Descricao']}
-                        </div>
-                        <div style="display:flex; align-items:center; font-size:0.85rem; color:#6366F1; margin-bottom:15px;">
-                            ✨ <b>Sugestão IA:</b>&nbsp;{sugestao}
-                        </div>
+                        <div style="background:#F9FAFB; padding:15px; border-radius:8px; color:#4B5563; font-size:0.95rem; margin-bottom:15px;">{row['Descricao']}</div>
+                        <div style="display:flex; align-items:center; font-size:0.85rem; color:#6366F1; margin-bottom:15px;">✨ <b>Sugestão IA:</b>&nbsp;{sugestao}</div>
                     """, unsafe_allow_html=True)
                     
-                    # Ações (Botões Streamlit dentro do loop)
                     if st.session_state.id_intervencao_ativa == idx:
-                        st.markdown("---")
                         txt = st.text_area("Registrar Intervenção:", key=f"tx{idx}")
                         c_s, c_c = st.columns(2)
                         if c_s.button("💾 Salvar e Gerar PDF", key=f"sv{idx}"):
@@ -669,18 +547,16 @@ elif menu == "Painel Gestão":
                             st.session_state.pdf_buffer = gerar_pdf_lote(pd.DataFrame([d_imp]))
                             st.session_state.id_intervencao_ativa = None; st.rerun()
                         if c_c.button("Cancelar", key=f"can{idx}"): st.session_state.id_intervencao_ativa = None; st.rerun()
-                    
                     else:
                         if 'pdf_buffer' in st.session_state and st.session_state.pdf_buffer:
                             st.success("✅ Documento Gerado!")
                             st.download_button("📥 Baixar Ficha", st.session_state.pdf_buffer, "Ocorrencia.pdf", "application/pdf")
                             if st.button("Fechar"): st.session_state.pdf_buffer = None; st.rerun()
                         elif st.session_state.id_intervencao_ativa is None:
-                            # Botões lado a lado
                             cb1, cb2, cb3, cb4 = st.columns([1.5, 1.5, 1, 1])
                             if cb1.button("✅ Resolver", key=f"ok{idx}"): atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", "Visto"); st.rerun()
                             if cb2.button("✍️ Intervir", key=f"bi{idx}"): st.session_state.id_intervencao_ativa = idx; st.rerun()
                             if link_whats: cb3.link_button("💬 Zap", link_whats)
                             if cb4.button("🗑️", key=f"d{idx}"): excluir_ocorrencia(row['Aluno'], row['Descricao'][:10]); st.rerun()
                     
-                    st.markdown("</div>", unsafe_allow_html=True) # Fecha Card
+                    st.markdown("</div>", unsafe_allow_html=True)
