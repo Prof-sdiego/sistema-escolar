@@ -10,24 +10,20 @@ import google.generativeai as genai
 from fpdf import FPDF
 import hashlib
 import urllib.parse
-import re
 
 # --- CONFIGURAÇÕES GERAIS ---
 st.set_page_config(page_title="EduGestor Pro", layout="wide", page_icon="🎓")
 
-# --- INJEÇÃO DE JAVASCRIPT (NOTIFICAÇÕES DESKTOP) ---
-# Isso permite que o site mande avisos do Windows/Mac mesmo minimizado
+# --- JAVASCRIPT PARA NOTIFICAÇÕES ---
 js_notification = """
 <script>
-    function requestNotificationPermission() {
+    function askPermission() {
         if (!("Notification" in window)) {
             alert("Este navegador não suporta notificações de desktop");
-        } else if (Notification.permission !== "granted") {
+        } else {
             Notification.requestPermission();
         }
     }
-    requestNotificationPermission();
-    
     function sendNotification(title, body) {
         if (Notification.permission === "granted") {
             new Notification(title, {
@@ -48,6 +44,8 @@ st.markdown("""
     .stApp { background-color: #F3F4F6; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     
+    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
+    
     .card {
         background-color: white; border-radius: 12px; padding: 20px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 20px; border: 1px solid #F3F4F6;
@@ -62,17 +60,25 @@ st.markdown("""
         display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px;
     }
     
-    .ai-card {
-        background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-        border-radius: 16px; padding: 25px; color: white; margin-bottom: 20px;
-        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
+    .ai-section {
+        background-color: #F5F3FF; border: 1px solid #7C3AED; border-radius: 8px;
+        padding: 10px; margin-top: 10px; font-size: 0.9rem; color: #5B21B6;
     }
-    .ai-card h3 { color: white !important; margin: 0 0 10px 0; }
-    .ai-card p { color: #E0E7FF; font-size: 0.9rem; }
-
-    /* Notificação de Encaminhamento */
+    
     .encaminhamento {
-        border: 2px dashed #F59E0B; background-color: #FFFBEB; padding: 10px; border-radius: 8px; margin-top: 5px; font-weight: bold; color: #92400E;
+        border: 2px dashed #F59E0B; background-color: #FFFBEB; padding: 10px; 
+        border-radius: 8px; margin-top: 5px; font-weight: bold; color: #92400E;
+    }
+
+    /* Estilo da Navegação Interna (Radio Horizontal) */
+    div[role="radiogroup"] {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        background: white;
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 20px;
     }
 
     @media print {
@@ -90,7 +96,7 @@ def conectar():
     client = gspread.authorize(creds)
     return client.open("Dados_Escolares")
 
-# --- IA (CONFIGURAÇÃO) ---
+# --- IA ---
 @st.cache_resource
 def configurar_ia_automatica():
     try:
@@ -146,12 +152,9 @@ def salvar_ocorrencia(alunos_lista, turma, prof, desc, acao, encaminhado="Não",
     try:
         sheet = conectar().sheet1
         data = datetime.now().strftime("%Y-%m-%d %H:%M")
-        # Se a planilha não tiver a coluna 'Encaminhado' (coluna I / 9), vamos assumir que é a última
-        # Recomendo criar na planilha a coluna "Encaminhado" depois de "Status_Gestao"
         for aluno in alunos_lista:
             aluno_limpo = aluno.strip()
             if aluno_limpo:
-                # Adiciona linha: Data, Aluno, Turma, Prof, Desc, Acao, Intervencao, Status, Encaminhado
                 sheet.append_row([data, aluno_limpo, turma, prof, desc, acao, intervencao, "Pendente", encaminhado])
         limpar_cache()
         return True
@@ -187,7 +190,7 @@ def atualizar_alerta_status(turma, novo_status):
         for i, row in enumerate(dados):
             if row['Turma'] == turma and row['Status'] != "Resolvido":
                 sheet.update_cell(i + 2, 4, novo_status); break
-        limpar_cache() # Importante para atualizar a UI
+        limpar_cache()
     except: pass
 
 def cadastrar_usuario(tipo, nome, codigo):
@@ -198,71 +201,57 @@ def cadastrar_usuario(tipo, nome, codigo):
     except: return False
 
 # --- SOM & NOTIFICAÇÃO ---
-def disparar_alerta(tipo="normal", titulo="Nova Ocorrência", corpo="Verifique o painel"):
-    """Toca som e manda notificação Windows"""
-    sound_url = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" # Ding
-    if tipo == "grave": sound_url = "https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3" # Sirene
-    elif tipo == "encaminhado": sound_url = "https://assets.mixkit.co/active_storage/sfx/1862/1862-preview.mp3" # Campainha
+def disparar_alerta(tipo="normal", titulo="EduGestor", corpo="Nova atualização"):
+    sound_url = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
+    if tipo == "grave": sound_url = "https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3"
+    elif tipo == "encaminhado": sound_url = "https://assets.mixkit.co/active_storage/sfx/1862/1862-preview.mp3"
     
-    # Audio Invisível
     st.markdown(f"""<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>""", unsafe_allow_html=True)
-    
-    # Notificação JS
     st.markdown(f"""<script>sendNotification("{titulo}", "{corpo}");</script>""", unsafe_allow_html=True)
 
 def gerenciar_notificacoes_gestao(df_oc, df_alertas):
-    """Lógica central de notificações para não repetir sons"""
     if 'historico_notificacoes' not in st.session_state: st.session_state.historico_notificacoes = set()
     
-    # 1. Alertas de Pânico Pendentes
     if not df_alertas.empty:
         pendentes = df_alertas[df_alertas['Status'] == "Pendente"]
         for _, row in pendentes.iterrows():
             chave = f"panico_{row['Data']}_{row['Turma']}"
             if chave not in st.session_state.historico_notificacoes:
-                disparar_alerta("grave", "🚨 PÂNICO NA SALA", f"Prof. {row['Professor']} pede ajuda na {row['Turma']}")
+                disparar_alerta("grave", "🚨 PÂNICO", f"Ajuda na sala {row['Turma']}")
                 st.session_state.historico_notificacoes.add(chave)
     
-    # 2. Novas Ocorrências / Encaminhamentos
     if not df_oc.empty and 'Status_Gestao' in df_oc.columns:
-        # Pega pendentes
         pendentes = df_oc[df_oc['Status_Gestao'].isin(["Pendente", ""])]
         for _, row in pendentes.iterrows():
             chave = f"oc_{row['Data']}_{row['Aluno']}"
             if chave not in st.session_state.historico_notificacoes:
-                # Verifica se é Encaminhamento
-                encaminhado = str(row.get('Encaminhado', 'Não'))
-                if encaminhado == "Sim":
-                    disparar_alerta("encaminhado", "🚶 Aluno a Caminho", f"{row['Aluno']} foi enviado para a direção.")
-                elif "Alta" in str(row.get('Acao_Sugerida')):
-                    disparar_alerta("grave", "🔴 Ocorrência Grave", f"{row['Aluno']} - {row['Turma']}")
-                else:
-                    disparar_alerta("normal", "📝 Nova Ocorrência", f"{row['Aluno']} - {row['Turma']}")
-                
+                enc = str(row.get('Encaminhado', 'Não'))
+                if enc == "Sim": disparar_alerta("encaminhado", "🚶 Aluno a Caminho", f"{row['Aluno']} enviado.")
+                elif "Alta" in str(row.get('Acao_Sugerida')): disparar_alerta("grave", "🔴 Grave", f"{row['Aluno']}")
+                else: disparar_alerta("normal", "📝 Nova Ocorrência", f"{row['Aluno']}")
                 st.session_state.historico_notificacoes.add(chave)
 
-# --- IA (TRANSCRIÇÃO + EXTRAÇÃO DE DADOS) ---
+# --- IA E VOZ ---
+def transcrever_audio(audio_bytes):
+    if not nome_modelo_ativo: return ""
+    try:
+        modelo = genai.GenerativeModel(nome_modelo_ativo)
+        resp = modelo.generate_content(["Transcreva fielmente.", {"mime_type": "audio/mp3", "data": audio_bytes}])
+        return resp.text
+    except: return ""
+
 def analisar_comando_voz(audio_bytes):
     if not nome_modelo_ativo: return None
     try:
         modelo = genai.GenerativeModel(nome_modelo_ativo)
-        prompt = """
-        Analise o áudio. Extraia as seguintes informações em formato JSON:
-        {
-            "texto_completo": "transcrição fiel do que foi dito",
-            "turma_detectada": "ex: 6A, 7B (se mencionado)",
-            "alunos_detectados": ["nome1", "nome2"] (se mencionados)
-        }
-        Se não detectar turma ou aluno, deixe o campo null.
-        """
+        prompt = """Analise o áudio. JSON: {"texto_completo": "txt", "turma_detectada": "ex: 6A", "alunos_detectados": ["nome"]}"""
         resp = modelo.generate_content([prompt, {"mime_type": "audio/mp3", "data": audio_bytes}])
-        texto_limpo = resp.text.replace("```json", "").replace("```", "")
-        return json.loads(texto_limpo)
+        return json.loads(resp.text.replace("```json", "").replace("```", ""))
     except: return None
 
 def consultar_ia(descricao, turma):
     if not nome_modelo_ativo: return "Erro Config", "IA Indisponível"
-    prompt = f"""Especialista CONVIVA SP (Protocolo 179). Dados: Turma {turma} | Fato: "{descricao}". Classifique GRAVIDADE: ALTA, MÉDIA, BAIXA. Sugira AÇÃO mediação. Responda: GRAVIDADE: [G] AÇÃO: [A]"""
+    prompt = f"""Especialista CONVIVA SP (Protocolo 179). Dados: Turma {turma} | Fato: "{descricao}". Classifique GRAVIDADE: ALTA, MÉDIA, BAIXA. Sugira AÇÃO mediação e acolhimento. Responda: GRAVIDADE: [G] AÇÃO: [A]"""
     try:
         safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
         modelo = genai.GenerativeModel(nome_modelo_ativo)
@@ -286,7 +275,7 @@ class PDF(FPDF):
 def imprimir_bloco(pdf, dados):
     def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
     if pdf.get_y() > 230: pdf.add_page()
-    pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 11)
+    pdf.set_fill_color(245, 245, 245); pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 8, limpa(f"DATA: {dados['Data']} | PROF: {dados['Professor']}"), 0, 1, 'L', True)
     pdf.set_font("Arial", '', 10); pdf.multi_cell(0, 6, limpa(f"FATO: {dados['Descricao']}"))
     pdf.set_font("Arial", 'I', 10); pdf.multi_cell(0, 6, limpa(f"INTERVENÇÃO: {dados.get('Intervencao', 'S/ Registro')}"))
@@ -306,29 +295,14 @@ def gerar_pdf_continuo(df_dados, titulo=""):
     imprimir_assinaturas(pdf)
     return pdf.output(dest='S').encode('latin-1')
 
-def gerar_pdf_conselho(df_turma, turma_nome):
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, f"RELATÓRIO CONSELHO DE CLASSE - {turma_nome}", 0, 1, 'C'); pdf.ln(10)
-    
-    # Resumo
-    alunos_prob = df_turma['Aluno'].value_counts().head(5)
-    pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "ALUNOS COM MAIS REGISTROS:", 0, 1)
-    pdf.set_font("Arial", '', 11)
-    for aluno, qtd in alunos_prob.items():
-        pdf.cell(0, 8, f"{aluno.encode('latin-1', 'replace').decode('latin-1')}: {qtd} ocorrencias", 0, 1)
-    pdf.ln(10)
-    
-    # Detalhado
-    pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "DETALHAMENTO POR ALUNO:", 0, 1)
-    alunos_unicos = sorted(df_turma['Aluno'].unique())
+def gerar_pdf_turma_completa(df_turma):
+    pdf = PDF(); alunos_unicos = sorted(df_turma['Aluno'].unique())
+    def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
     for aluno in alunos_unicos:
-        if pdf.get_y() > 250: pdf.add_page()
-        pdf.set_font("Arial", 'B', 11); pdf.cell(0, 8, f">> {aluno.encode('latin-1', 'replace').decode('latin-1')}", 0, 1)
-        oc_aluno = df_turma[df_turma['Aluno'] == aluno]
-        for _, row in oc_aluno.iterrows():
-            imprimir_bloco(pdf, row.to_dict())
-            
+        pdf.add_page(); pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, limpa(f"ALUNO: {aluno}"), 0, 1, 'L'); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(5)
+        ocorrencias_aluno = df_turma[df_turma['Aluno'] == aluno]
+        for _, row in ocorrencias_aluno.iterrows(): imprimir_bloco(pdf, row.to_dict())
+        imprimir_assinaturas(pdf)
     return pdf.output(dest='S').encode('latin-1')
 
 # --- SESSÃO ---
@@ -337,8 +311,8 @@ if 'id_intervencao_ativa' not in st.session_state: st.session_state.id_intervenc
 if 'pdf_buffer' not in st.session_state: st.session_state.pdf_buffer = None
 if 'prof_turmas_permitidas' not in st.session_state: st.session_state.prof_turmas_permitidas = []
 if 'form_rascunho_desc' not in st.session_state: st.session_state.form_rascunho_desc = ""
+if 'nav_gestao' not in st.session_state: st.session_state.nav_gestao = "🔥 Feed" # Estado da Navegação Gestão
 
-# Login
 params = st.query_params
 if "prof_logado" in params: st.session_state.prof_logado = True; st.session_state.prof_nome = params["prof_nome"]
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
@@ -346,7 +320,7 @@ if "gestao_logada" in params: st.session_state.gestao_logada = True; st.session_
 if 'gestao_logada' not in st.session_state: st.session_state.gestao_logada = False
 
 # --- INTERFACE ---
-st.title("🏫 Ocorrência Digital")
+st.title("🏫 EduGestor Pro")
 menu = st.sidebar.radio("Menu", ["Acesso Professor", "Painel Gestão"])
 
 # ================= PROFESSOR =================
@@ -373,86 +347,61 @@ if menu == "Acesso Professor":
         tab_reg, tab_hist = st.tabs(["📝 Registrar", "🗂️ Histórico"])
 
         with tab_reg:
-            # PÂNICO
-            with st.expander("🚨 CHAMAR GESTÃO", expanded=False):
-                st.warning("Use apenas em emergências.")
-                c_p1, c_p2 = st.columns([3, 1])
-                turma_panico = c_p1.selectbox("Onde você está?", st.session_state.prof_turmas_permitidas, key="tp")
-                if c_p2.button("CHAMAR AGORA", type="primary"):
-                    salvar_alerta(turma_panico, st.session_state.prof_nome); st.toast("🚨 Enviado!"); time.sleep(1)
+            with st.expander("🚨 CHAMAR GESTÃO"):
+                if st.button("CHAMAR AJUDA AGORA", type="primary"):
+                    salvar_alerta("Sala Indefinida", st.session_state.prof_nome); st.toast("🚨 Enviado!"); time.sleep(1)
 
             st.markdown('<div class="card">', unsafe_allow_html=True)
-            
-            # VOZ
             st.write("🎙️ **Voz Inteligente:**")
-            audio_val = st.audio_input("Fale a ocorrência (Ex: 'O Pedro da 6A brigou')")
+            audio_val = st.audio_input("Fale (Ex: 'O Pedro da 6A brigou')")
             dados_voz = {}
             if audio_val:
                 with st.spinner("Processando..."):
                     dados_voz = analisar_comando_voz(audio_val.read())
-                    if dados_voz: 
-                        st.success("Entendido!")
-                        st.session_state.form_rascunho_desc = dados_voz.get('texto_completo', '')
+                    if dados_voz: st.success("Entendido!"); st.session_state.form_rascunho_desc = dados_voz.get('texto_completo', '')
 
-            # FORMULÁRIO
-            # Selectbox da turma fora do form para atualizar a lista de alunos
+            # TURMA (FORA DO FORM PARA ATUALIZAR ALUNOS)
             turma_pre = dados_voz.get('turma_detectada') if dados_voz else None
-            idx_t = 0
-            if turma_pre and turma_pre in st.session_state.prof_turmas_permitidas:
-                idx_t = st.session_state.prof_turmas_permitidas.index(turma_pre)
-            
+            idx_t = st.session_state.prof_turmas_permitidas.index(turma_pre) if turma_pre in st.session_state.prof_turmas_permitidas else 0
             turma_sel = st.selectbox("Turma:", st.session_state.prof_turmas_permitidas, index=idx_t)
             
-            # Carrega alunos
+            # LISTA ALUNOS (CORRIGIDA)
             df_a = carregar_alunos_contatos()
             lista_alunos = []
-            if not df_a.empty:
-                df_a['Turma'] = df_a['Turma'].astype(str).str.strip().str.upper()
-                lista_alunos = sorted(df_a[df_a['Turma'] == str(turma_sel).strip().upper()]['Nome'].unique().tolist())
+            if not df_a.empty and 'Turma' in df_a.columns:
+                df_a['Turma_Limpa'] = df_a['Turma'].astype(str).str.strip().str.upper()
+                turma_filtro = str(turma_sel).strip().upper()
+                lista_alunos = sorted(df_a[df_a['Turma_Limpa'] == turma_filtro]['Nome'].unique().tolist())
             
-            # Lista com opção "Outros"
-            lista_com_outros = ["OUTROS (Digitar Nome)"] + lista_alunos
-            
-            # Pre-seleção de aluno por voz
-            alunos_voz = dados_voz.get('alunos_detectados', [])
-            default_alunos = [a for a in alunos_voz if a in lista_alunos]
+            lista_com_outros = ["OUTROS (Digitar)"] + lista_alunos
+            default_alunos = [a for a in dados_voz.get('alunos_detectados', []) if a in lista_alunos]
 
             with st.form("form_oc", clear_on_submit=True):
                 st.markdown("#### Detalhes")
-                
                 alunos_sel = st.multiselect("Alunos:", lista_com_outros, default=default_alunos)
-                
-                # Lógica para campo manual se escolher "OUTROS" ou lista vazia
                 alunos_manual = ""
-                if "OUTROS (Digitar Nome)" in alunos_sel or not lista_alunos:
-                    alunos_manual = st.text_input("Digite os nomes (separados por vírgula):")
+                if "OUTROS (Digitar)" in alunos_sel or not lista_alunos:
+                    alunos_manual = st.text_input("Digite os nomes (vírgula):")
                 
-                # Histórico Imediato
                 if alunos_sel:
                     df_hist = carregar_ocorrencias_cache()
                     if not df_hist.empty:
-                        nomes_limpos = [n for n in alunos_sel if n != "OUTROS (Digitar Nome)"]
-                        total_prev = len(df_hist[df_hist['Aluno'].isin(nomes_limpos)])
-                        if total_prev > 0:
-                            st.info(f"⚠️ Histórico: Estes alunos já possuem {total_prev} ocorrências registradas.")
+                        total_prev = len(df_hist[df_hist['Aluno'].isin([n for n in alunos_sel if n != "OUTROS (Digitar)"])])
+                        if total_prev > 0: st.info(f"⚠️ Histórico: {total_prev} ocorrências anteriores.")
 
-                encaminhar = st.checkbox("🚶 Encaminhar aluno para a Direção agora?")
-                
-                # Rascunho automático no value
-                desc = st.text_area("Descrição:", value=st.session_state.form_rascunho_desc, height=150, key="txt_desc")
+                encaminhar = st.checkbox("🚶 Encaminhar à Direção?")
+                desc = st.text_area("Descrição:", value=st.session_state.form_rascunho_desc, height=150)
                 
                 if st.form_submit_button("Enviar", type="primary"):
-                    # Processa lista final
-                    final = [n for n in alunos_sel if n != "OUTROS (Digitar Nome)"]
+                    final = [n for n in alunos_sel if n != "OUTROS (Digitar)"]
                     if alunos_manual: final.extend([x.strip() for x in alunos_manual.split(',') if x.strip()])
                     
                     if final and desc:
                         g, a = consultar_ia(desc, turma_sel)
                         enc_str = "Sim" if encaminhar else "Não"
                         salvar_ocorrencia(final, turma_sel, st.session_state.prof_nome, desc, a, enc_str)
-                        st.toast("Salvo!"); st.session_state.form_rascunho_desc = "" # Limpa rascunho
-                        time.sleep(1)
-                    else: st.warning("Preencha alunos e descrição.")
+                        st.toast("Salvo!"); st.session_state.form_rascunho_desc = ""; time.sleep(1); st.rerun()
+                    else: st.warning("Preencha tudo.")
             st.markdown('</div>', unsafe_allow_html=True)
 
         with tab_hist:
@@ -464,6 +413,10 @@ if menu == "Acesso Professor":
 
 # ================= GESTÃO =================
 elif menu == "Painel Gestão":
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("""<button onclick="askPermission()" style="background:none; border:1px solid #ccc; border-radius:5px; padding:5px; cursor:pointer;">🔔 Ativar Notificações</button>""", unsafe_allow_html=True)
+
     if not st.session_state.gestao_logada:
         c1, c2, c3 = st.columns([1,2,1])
         with c2:
@@ -484,28 +437,40 @@ elif menu == "Painel Gestão":
         c1, c2 = st.columns([5,1]); c1.info(f"Gestor: **{st.session_state.gestao_nome}**")
         if c2.button("Sair"): st.session_state.gestao_logada = False; st.query_params.clear(); st.rerun()
 
-        if st.session_state.id_intervencao_ativa is None: st_autorefresh(interval=10000, key="gestaorefresh")
+        # --- NAVEGAÇÃO (SUBSTITUI ABAS) ---
+        nav = st.radio("", ["🔥 Feed", "📝 Registrar", "🏫 Histórico", "🖨️ Relatórios", "⚙️ Admin"], horizontal=True, key="navegacao_gestao")
 
-        # LÓGICA DE NOTIFICAÇÃO
+        # --- LOGICA DE REFRESH INTELIGENTE ---
+        # Só atualiza automaticamente se estiver na aba "Feed" E não estiver editando nada
+        if nav == "🔥 Feed" and st.session_state.id_intervencao_ativa is None:
+            st_autorefresh(interval=15000, key="gestaorefresh")
+        else:
+            if nav == "🔥 Feed": st.info("⏸️ Atualização pausada (Edição ativa)")
+
         df_oc = carregar_ocorrencias_cache()
         df_alertas = carregar_alertas()
         gerenciar_notificacoes_gestao(df_oc, df_alertas)
 
-        # ALERTAS UI
-        if not df_alertas.empty:
-            for i, row in df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])].iterrows():
-                st.error(f"🚨 SALA {row['Turma']} ({row['Professor']})")
-                c_a, c_b = st.columns(2)
-                # CORREÇÃO LÓGICA BOTOES
-                if row['Status'] == "Pendente":
-                    if c_a.button("Atender", key=f"at{i}"): atualizar_alerta_status(row['Turma'], "Em Atendimento"); st.rerun()
-                else: # Em Atendimento
-                    if c_a.button("✅ Resolver", key=f"res{i}"): atualizar_alerta_status(row['Turma'], "Resolvido"); st.rerun()
-                    if c_b.button("📝 Ocorrência", key=f"reg{i}"): st.info("Preencha na aba Registrar"); st.rerun()
+        # --- CONTEÚDO ---
+        if nav == "🔥 Feed":
+            # ALERTAS
+            if not df_alertas.empty:
+                for i, row in df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])].iterrows():
+                    st.error(f"🚨 SALA {row['Turma']} ({row['Professor']})")
+                    c_a, c_b = st.columns(2)
+                    if row['Status'] == "Pendente":
+                        if c_a.button("Atender", key=f"at{i}"): 
+                            atualizar_alerta_status(row['Turma'], "Em Atendimento")
+                            # Força a troca para a aba de registro se necessário (opcional)
+                            st.rerun()
+                    else: 
+                        if c_a.button("✅ Resolvido", key=f"res{i}"): atualizar_alerta_status(row['Turma'], "Resolvido"); st.rerun()
+                        if c_b.button("📝 Ocorrência", key=f"reg{i}"): 
+                            # Troca a aba programaticamente
+                            st.session_state.navegacao_gestao = "📝 Registrar"
+                            st.session_state.dados_panico = {"turma": row['Turma'], "prof": row['Professor']}
+                            st.rerun()
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔥 Feed", "🏫 Histórico", "🖨️ Relatórios", "📝 Registrar", "⚙️ Admin"])
-        
-        with tab1:
             if not df_oc.empty:
                 f_st = st.selectbox("Visualizar:", ["Pendentes", "Arquivados", "Todos"])
                 df_show = df_oc
@@ -519,14 +484,16 @@ elif menu == "Painel Gestão":
                     
                     with st.container():
                         st.markdown(f"""<div class="card" style="background:{cor}; border-left:5px solid orange">
-                        <b>{row['Aluno']}</b> ({row['Turma']})<br><i>"{row['Descricao']}"</i>{enc_tag}</div>""", unsafe_allow_html=True)
+                        <b>{row['Aluno']}</b> ({row['Turma']})<br><i>"{row['Descricao']}"</i><div class="ai-section">🤖 <b>Conviva:</b> {row.get('Acao_Sugerida')}</div>{enc_tag}</div>""", unsafe_allow_html=True)
                         
                         if st.session_state.id_intervencao_ativa == idx:
                             txt = st.text_area("Ação:", key=f"tx{idx}")
-                            if st.button("Salvar", key=f"sv{idx}"):
+                            c1, c2 = st.columns(2)
+                            if c1.button("Salvar", key=f"sv{idx}"):
                                 atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", txt)
                                 st.session_state.pdf_buffer = gerar_pdf_continuo(pd.DataFrame([row.to_dict() | {'Intervencao': txt}]))
                                 st.session_state.id_intervencao_ativa = None; st.rerun()
+                            if c2.button("Cancelar", key=f"can{idx}"): st.session_state.id_intervencao_ativa = None; st.rerun()
                         else:
                             if 'pdf_buffer' in st.session_state and st.session_state.pdf_buffer:
                                 st.download_button("📥 PDF", st.session_state.pdf_buffer, "Ficha.pdf", "application/pdf")
@@ -534,34 +501,38 @@ elif menu == "Painel Gestão":
                             elif st.session_state.id_intervencao_ativa is None:
                                 if st.button("Intervir", key=f"b{idx}"): st.session_state.id_intervencao_ativa = idx; st.rerun()
 
-        with tab2: 
+        elif nav == "📝 Registrar":
+            dpre = st.session_state.get('dados_panico', {})
+            if dpre: st.info(f"Resolvendo chamado da {dpre.get('turma', '')}")
+            tg = st.selectbox("Turma", ["6A","6B","7A","7B","8A","8B","9A","9B"], index=["6A","6B","7A","7B","8A","8B","9A","9B"].index(dpre.get('turma', "6A")) if dpre else 0)
+            with st.form("new_reg", clear_on_submit=True):
+                ag = st.text_input("Aluno"); dg = st.text_area("Fato"); ig = st.text_area("Intervenção")
+                if st.form_submit_button("Salvar"):
+                    salvar_ocorrencia([ag], tg, "GESTÃO", dg, "Média", "Não", ig)
+                    if dpre: atualizar_alerta_status(dpre['turma'], "Resolvido"); del st.session_state['dados_panico']
+                    st.success("Ok")
+
+        elif nav == "🏫 Histórico":
             if not df_oc.empty: st.dataframe(df_oc)
 
-        with tab3:
-            st.header("🖨️ Relatórios PDF")
+        elif nav == "🖨️ Relatórios":
+            st.header("🖨️ Relatórios (PDF)")
             if not df_oc.empty:
-                mod = st.radio("Tipo:", ["Conselho de Classe (Turma)", "Individual (Aluno)"])
+                mod = st.radio("Modo:", ["Por Aluno", "Por Turma"])
                 ts = st.selectbox("Turma:", sorted(df_oc['Turma'].astype(str).unique()))
                 dft = df_oc[df_oc['Turma'] == ts]
                 
-                if mod == "Individual (Aluno)":
+                if mod == "Por Aluno":
                     al = st.selectbox("Aluno:", sorted(dft['Aluno'].unique()))
-                    if st.button("Gerar Relatório"):
+                    if st.button("Gerar PDF Aluno"):
                         pdf = gerar_pdf_continuo(dft[dft['Aluno'] == al], f"HISTÓRICO: {al}")
                         st.download_button("📥 Baixar", pdf, "Rel_Aluno.pdf", "application/pdf")
                 else:
-                    if st.button("Gerar Relatório Conselho"):
-                        pdf = gerar_pdf_conselho(dft, ts)
-                        st.download_button("📥 Baixar Conselho", pdf, f"Conselho_{ts}.pdf", "application/pdf")
+                    if st.button("Gerar PDF Turma"):
+                        pdf = gerar_pdf_turma_completa(dft)
+                        st.download_button("📥 Baixar Turma", pdf, "Rel_Turma.pdf", "application/pdf")
 
-        with tab4:
-            with st.form("new_reg", clear_on_submit=True):
-                tg = st.selectbox("Turma", ["6A","6B","7A","7B","8A","8B","9A","9B"])
-                ag = st.text_input("Aluno"); dg = st.text_area("Fato"); ig = st.text_area("Intervenção")
-                if st.form_submit_button("Salvar"):
-                    salvar_ocorrencia([ag], tg, "GESTÃO", dg, "Média", "Não", ig); st.success("Ok")
-
-        with tab5:
+        elif nav == "⚙️ Admin":
             with st.form("new_usr", clear_on_submit=True):
                 tp = st.selectbox("Tipo", ["Professor", "Gestor"])
                 nm = st.text_input("Nome"); cd = st.text_input("Senha")
