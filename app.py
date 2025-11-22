@@ -14,44 +14,24 @@ import urllib.parse
 # --- CONFIGURAÇÕES GERAIS ---
 st.set_page_config(page_title="EduGestor Pro", layout="wide", page_icon="🎓")
 
-# --- CSS (VISUAL) ---
+# --- CSS ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #F3F4F6; }
-    #MainMenu {visibility: hidden;} 
-    footer {visibility: hidden;} 
-    header {visibility: hidden;}
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     
-    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
-    
-    .card {
-        background-color: white; border-radius: 12px; padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 20px; border: 1px solid #F3F4F6;
-    }
+    .card { background-color: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #F3F4F6; }
     .badge { padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
     .badge-leve { background-color: #D1FAE5; color: #065F46; }
     .badge-media { background-color: #FEF3C7; color: #92400E; }
     .badge-grave { background-color: #FEE2E2; color: #991B1B; }
-    
-    .avatar {
-        width: 40px; height: 40px; border-radius: 50%; background-color: #E0E7FF; color: #4F46E5;
-        display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px;
-    }
-    
-    .ai-card {
-        background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-        border-radius: 16px; padding: 25px; color: white; margin-bottom: 20px;
-        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
-    }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; background-color: #E0E7FF; color: #4F46E5; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+    .ai-card { background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%); border-radius: 16px; padding: 25px; color: white; margin-bottom: 20px; box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4); }
     .ai-card h3 { color: white !important; margin: 0 0 10px 0; }
     .ai-card p { color: #E0E7FF; font-size: 0.9rem; }
-
-    @media print {
-        @page { size: A4; margin: 0; }
-        body * { visibility: hidden; }
-    }
+    @media print { @page { size: A4; margin: 0; } body * { visibility: hidden; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -135,8 +115,7 @@ def atualizar_status_gestao(aluno, data_ocorrencia, novo_status, intervencao_tex
             if nome_na_planilha == aluno:
                 sheet.update_cell(cell.row, 8, novo_status)
                 if intervencao_texto: sheet.update_cell(cell.row, 7, intervencao_texto)
-                limpar_cache()
-                return True
+                limpar_cache(); return True
     except: pass
     return False
 
@@ -211,201 +190,150 @@ def gerar_mensagem_whats(aluno, responsavel, fato, intervencao):
         return resp.text
     except: return f"Olá {responsavel}, sobre aluno {aluno}: {fato}."
 
-# --- GERADOR PDF CONTÍNUO ---
+# --- PDF (FPDF) ---
 class PDF(FPDF):
     def header(self):
-        self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, 'EDUGESTOR - RELATÓRIO CONTÍNUO', 0, 1, 'C')
-        self.ln(5)
-        self.line(10, 25, 200, 25)
-        self.ln(10)
-
+        self.set_font('Arial', 'B', 16); self.cell(0, 10, 'EDUGESTOR - RELATÓRIO ESCOLAR', 0, 1, 'C'); self.ln(5); self.line(10, 25, 200, 25); self.ln(10)
     def footer(self):
-        self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.set_y(-15); self.set_font('Arial', 'I', 8); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
-def imprimir_bloco_ocorrencia(pdf, dados):
+def desenhar_pagina_ocorrencia(pdf, dados):
     def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
+    if pdf.get_y() > 230: pdf.add_page()
     
-    # Verifica se cabe na página (aprox 60mm por bloco)
-    if pdf.get_y() > 230: 
-        pdf.add_page()
-    
-    # Caixa de fundo
     pdf.set_fill_color(245, 245, 245)
     pdf.set_font("Arial", 'B', 11)
-    
-    # Título do bloco
     pdf.cell(0, 8, limpa(f"DATA: {dados['Data']} | PROFESSOR: {dados['Professor']}"), 0, 1, 'L', True)
-    
     pdf.set_font("Arial", '', 10)
     pdf.multi_cell(0, 6, limpa(f"FATOS: {dados['Descricao']}"))
     pdf.ln(2)
-    
     pdf.set_font("Arial", 'I', 10)
     interv = dados.get('Intervencao', '') or "Sem registro."
     pdf.multi_cell(0, 6, limpa(f"INTERVENÇÃO: {interv}"))
-    
-    pdf.ln(2)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Linha separadora
-    pdf.ln(5)
+    pdf.ln(2); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(5)
 
 def imprimir_assinaturas(pdf):
-    # Adiciona assinaturas no final (verifica se cabe)
     if pdf.get_y() > 240: pdf.add_page()
-    
-    pdf.ln(10)
-    y = pdf.get_y()
-    pdf.set_font("Arial", '', 9)
-    
+    pdf.ln(10); y = pdf.get_y(); pdf.set_font("Arial", '', 9)
     pdf.line(20, y, 80, y); pdf.text(35, y+5, "Aluno(a)")
     pdf.line(120, y, 180, y); pdf.text(135, y+5, "Responsável")
-    pdf.ln(20)
-    pdf.line(70, pdf.get_y(), 140, pdf.get_y()); pdf.text(90, pdf.get_y()+5, "Gestão Escolar")
+    pdf.ln(20); pdf.line(70, pdf.get_y(), 140, pdf.get_y()); pdf.text(90, pdf.get_y()+5, "Gestão Escolar")
 
 def gerar_pdf_continuo(df_dados, titulo_extra=""):
-    pdf = PDF()
-    pdf.add_page()
-    
+    pdf = PDF(); pdf.add_page()
     def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
-    
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, limpa(titulo_extra), 0, 1, 'L')
-    pdf.ln(5)
-    
-    for _, row in df_dados.iterrows():
-        imprimir_bloco_ocorrencia(pdf, row.to_dict())
-    
+    pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa(titulo_extra), 0, 1, 'L'); pdf.ln(5)
+    for _, row in df_dados.iterrows(): desenhar_pagina_ocorrencia(pdf, row.to_dict())
     imprimir_assinaturas(pdf)
     return pdf.output(dest='S').encode('latin-1')
 
 def gerar_pdf_turma_completa(df_turma):
-    # Um aluno por folha (ou conjunto de folhas), mas contínuo para aquele aluno
-    pdf = PDF()
-    
-    alunos_unicos = sorted(df_turma['Aluno'].unique())
-    
+    pdf = PDF(); alunos_unicos = sorted(df_turma['Aluno'].unique())
     def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
-
     for aluno in alunos_unicos:
-        pdf.add_page()
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, limpa(f"ALUNO: {aluno}"), 0, 1, 'L')
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-        
+        pdf.add_page(); pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, limpa(f"ALUNO: {aluno}"), 0, 1, 'L'); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(5)
         ocorrencias_aluno = df_turma[df_turma['Aluno'] == aluno]
-        for _, row in ocorrencias_aluno.iterrows():
-            imprimir_bloco_ocorrencia(pdf, row.to_dict())
-            
+        for _, row in ocorrencias_aluno.iterrows(): desenhar_pagina_ocorrencia(pdf, row.to_dict())
         imprimir_assinaturas(pdf)
-        
     return pdf.output(dest='S').encode('latin-1')
 
-# --- ESTADOS DA SESSÃO ---
+# --- ESTADOS ---
 if 'panico_mode' not in st.session_state: st.session_state.panico_mode = False
 if 'id_intervencao_ativa' not in st.session_state: st.session_state.id_intervencao_ativa = None
 if 'total_ocorrencias' not in st.session_state: st.session_state.total_ocorrencias = 0
 if 'pdf_buffer' not in st.session_state: st.session_state.pdf_buffer = None
 if 'prof_turmas_permitidas' not in st.session_state: st.session_state.prof_turmas_permitidas = []
 
-# Recuperação de Login (Session)
 params = st.query_params
-if "prof_logado" in params: 
-    st.session_state.prof_logado = True; st.session_state.prof_nome = params["prof_nome"]
+if "prof_logado" in params: st.session_state.prof_logado = True; st.session_state.prof_nome = params["prof_nome"]
 if 'prof_logado' not in st.session_state: st.session_state.prof_logado = False
-
 if "gestao_logada" in params: st.session_state.gestao_logada = True; st.session_state.gestao_nome = params["gestao_nome"]
 if 'gestao_logada' not in st.session_state: st.session_state.gestao_logada = False
 
-# ==============================================================================
-#  INTERFACE
-# ==============================================================================
-with st.sidebar:
-    st.markdown("## 🎓 **EduGestor**")
-    menu = st.radio("", ["Acesso Professor", "Painel Gestão"], index=0, key="main_menu")
-    st.markdown("---")
-    if st.session_state.prof_logado: st.write(f"👤 **{st.session_state.prof_nome}**")
-    elif st.session_state.gestao_logada: st.write(f"📊 **{st.session_state.gestao_nome}**")
+# --- INTERFACE ---
+st.title("🏫 EduGestor Pro")
+menu = st.sidebar.radio("Menu", ["Acesso Professor", "Painel Gestão"])
 
 # ================= PROFESSOR =================
 if menu == "Acesso Professor":
     if not st.session_state.prof_logado:
-        c1, c2, c3 = st.columns([1,2,1])
-        with c2:
-            st.markdown("### 👋 Professor")
-            with st.form("login_prof"):
-                ln = st.text_input("Nome"); lc = st.text_input("Código", type="password")
-                if st.form_submit_button("Entrar", type="primary"):
-                    df = carregar_professores()
-                    if not df.empty:
-                        df['Codigo'] = df['Codigo'].astype(str)
-                        usuario = df[(df['Nome'] == ln) & (df['Codigo'] == lc)]
-                        if not usuario.empty:
-                            st.session_state.prof_logado = True; st.session_state.prof_nome = ln
-                            turmas_raw = str(usuario.iloc[0].get('Turmas', '')).strip()
-                            if turmas_raw: st.session_state.prof_turmas_permitidas = [t.strip() for t in turmas_raw.split(",") if t.strip()]
-                            else: st.session_state.prof_turmas_permitidas = ["6A","6B","7A","7B","8A","8B","9A","9B"]
-                            st.query_params["prof_logado"] = "true"; st.query_params["prof_nome"] = ln; st.rerun()
-                        else: st.error("Erro.")
-                    else: st.error("Erro.")
+        with st.form("login_prof"):
+            st.write("### 🔐 Acesso Professor")
+            ln = st.text_input("Nome"); lc = st.text_input("Código", type="password")
+            if st.form_submit_button("Entrar", type="primary"):
+                df = carregar_professores()
+                if not df.empty:
+                    df['Codigo'] = df['Codigo'].astype(str)
+                    usuario = df[(df['Nome'] == ln) & (df['Codigo'] == lc)]
+                    if not usuario.empty:
+                        st.session_state.prof_logado = True; st.session_state.prof_nome = ln
+                        turmas_raw = str(usuario.iloc[0].get('Turmas', '')).strip()
+                        if turmas_raw: st.session_state.prof_turmas_permitidas = [t.strip() for t in turmas_raw.split(",") if t.strip()]
+                        else: st.session_state.prof_turmas_permitidas = ["6A","6B","7A","7B","8A","8B","9A","9B"]
+                        st.query_params["prof_logado"] = "true"; st.query_params["prof_nome"] = ln; st.rerun()
+                    else: st.error("Dados inválidos.")
+                else: st.error("Erro conexão.")
     else:
         if not st.session_state.prof_turmas_permitidas: st.session_state.prof_turmas_permitidas = ["6A","6B","7A","7B","8A","8B","9A","9B"]
         c_head1, c_head2 = st.columns([5,1])
         with c_head1: st.markdown(f"## Olá, **{st.session_state.prof_nome}**")
         with c_head2: 
-            if st.button("Sair"): st.session_state.prof_logado = False; st.query_params.clear(); st.rerun()
+            if st.button("Sair", key="sair_p"): st.session_state.prof_logado = False; st.query_params.clear(); st.rerun()
 
         tab_reg, tab_hist = st.tabs(["📝 Registrar", "🗂️ Histórico"])
 
         with tab_reg:
             with st.expander("🚨 CHAMAR GESTÃO"):
                 if st.button("CHAMAR AJUDA AGORA", type="primary"):
-                    salvar_alerta("Sala Indefinida", st.session_state.prof_nome); st.toast("🚨 Enviado!")
+                    salvar_alerta("Sala Indefinida", st.session_state.prof_nome); st.toast("🚨 Enviado!", icon="🚨")
 
             st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.write("🎙️ **Ditado:**")
+            st.write("🎙️ **Ditado Inteligente:**")
             audio_val = st.audio_input("Gravar")
             texto_transcrito = ""
             if audio_val:
                 with st.spinner("Transcrevendo..."): texto_transcrito = transcrever_audio(audio_val.read())
 
-            with st.form("form_oc", clear_on_submit=True):
-                turma_sel = st.selectbox("Turma", st.session_state.prof_turmas_permitidas)
-                
-                # --- CORREÇÃO LISTA ALUNOS ---
-                df_a = carregar_alunos_contatos()
-                lista_alunos = []
-                if not df_a.empty and 'Turma' in df_a.columns:
-                    # Garante conversão segura para string antes de filtrar
-                    df_a['Turma'] = df_a['Turma'].astype(str)
-                    turma_str = str(turma_sel).strip().upper()
-                    lista_alunos = sorted(df_a[df_a['Turma'].str.strip().str.upper() == turma_str]['Nome'].unique().tolist())
-                
-                if lista_alunos:
-                    alunos_input = st.multiselect("Alunos:", lista_alunos)
-                    alunos_manuais = ""
-                else:
-                    alunos_input = []
-                    alunos_manuais = st.text_area("Alunos (manual):", placeholder="Ex: João, Maria")
+            # --- SELEÇÃO DE TURMA FORA DO FORM (PARA REFRESH) ---
+            turma_sel = st.selectbox("Selecione a Turma:", st.session_state.prof_turmas_permitidas)
+            
+            # --- LÓGICA DE FILTRO DE ALUNOS (ROBUSTA) ---
+            df_alunos = carregar_alunos_contatos()
+            lista_alunos_turma = []
+            if not df_alunos.empty and 'Turma' in df_alunos.columns and 'Nome' in df_alunos.columns:
+                df_alunos['Turma_Limpa'] = df_alunos['Turma'].astype(str).str.strip().str.upper()
+                turma_filtro = str(turma_sel).strip().upper()
+                lista_alunos_turma = sorted(df_alunos[df_alunos['Turma_Limpa'] == turma_filtro]['Nome'].unique().tolist())
 
-                descricao = st.text_area("Descrição", value=texto_transcrito, height=150)
+            with st.form("form_oc", clear_on_submit=True):
+                st.markdown("#### Nova Ocorrência")
                 
-                if st.form_submit_button("Enviar", type="primary"):
-                    final = alunos_input if lista_alunos else [x.strip() for x in alunos_manuais.split(',') if x.strip()]
+                if lista_alunos_turma:
+                    alunos_input = st.multiselect("Selecione os Alunos:", lista_alunos_turma)
+                    alunos_texto = ""
+                else:
+                    st.warning("⚠️ Nenhum aluno encontrado nesta turma na planilha. Digite abaixo:")
+                    alunos_texto = st.text_area("Alunos (separados por vírgula)", placeholder="Ex: João, Maria")
+                    alunos_input = []
+
+                descricao = st.text_area("Descrição Detalhada do Fato", value=texto_transcrito, height=150)
+                
+                if st.form_submit_button("Enviar Ocorrência", type="primary"):
+                    final = alunos_input if lista_alunos_turma else [x.strip() for x in alunos_texto.split(',') if x.strip()]
                     if final and descricao:
+                        st.toast("✅ Enviado!", icon="🚀")
                         g, a = consultar_ia(descricao, turma_sel)
                         salvar_ocorrencia(final, turma_sel, st.session_state.prof_nome, descricao, a)
-                        st.toast("Salvo!"); time.sleep(1)
-                    else: st.warning("Preencha tudo.")
+                    else: st.warning("Preencha todos os campos.")
             st.markdown('</div>', unsafe_allow_html=True)
 
         with tab_hist:
             df = carregar_ocorrencias_cache()
             if not df.empty:
                 for i, r in df[df['Professor'] == st.session_state.prof_nome].iloc[::-1].iterrows():
-                    st.info(f"{r['Data']} | {r['Aluno']} | {r['Status_Gestao']}")
+                    cor = "green" if r['Status_Gestao'] == "Arquivado" else "orange"
+                    st.markdown(f"""<div class="card" style="border-left:5px solid {cor}">
+                    <b>{r['Aluno']}</b> ({r['Data']})<br>{r['Descricao']}<br><small><b>Gestão:</b> {r.get('Intervencao', 'Aguardando')}</small></div>""", unsafe_allow_html=True)
 
 # ================= GESTÃO =================
 elif menu == "Painel Gestão":
@@ -417,17 +345,17 @@ elif menu == "Painel Gestão":
                 gn = st.text_input("Usuário"); gc = st.text_input("Senha", type="password")
                 if st.form_submit_button("Entrar", type="primary"):
                     hash_real = "0b3ea097e02015db007c4b357e12692702b2226633299d0775907ff424a06e30"
-                    if hashlib.sha256(gc.encode()).hexdigest() == hash_real:
-                        st.session_state.gestao_logada = True; st.session_state.gestao_nome = gn
-                        st.query_params["gestao_logada"] = "true"; st.query_params["gestao_nome"] = gn; st.rerun()
+                    login_ok = False
+                    if hashlib.sha256(gc.encode()).hexdigest() == hash_real: login_ok = True
                     else:
                         df_g = carregar_gestores()
                         if not df_g.empty:
                             df_g['Codigo'] = df_g['Codigo'].astype(str)
-                            if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty:
-                                st.session_state.gestao_logada = True; st.session_state.gestao_nome = gn
-                                st.query_params["gestao_logada"] = "true"; st.query_params["gestao_nome"] = gn; st.rerun()
-                        st.error("Erro.")
+                            if not df_g[(df_g['Nome'] == gn) & (df_g['Codigo'] == gc)].empty: login_ok = True
+                    if login_ok:
+                        st.session_state.gestao_logada = True; st.session_state.gestao_nome = gn
+                        st.query_params["gestao_logada"] = "true"; st.query_params["gestao_nome"] = gn; st.rerun()
+                    else: st.error("Acesso negado.")
     else:
         col_g1, col_g2 = st.columns([4,1])
         col_g1.info(f"Gestor: **{st.session_state.gestao_nome}**")
@@ -440,6 +368,7 @@ elif menu == "Painel Gestão":
             for i, row in df_alertas[df_alertas['Status'].isin(["Pendente", "Em Atendimento"])].iterrows():
                 st.error(f"🚨 SALA {row['Turma']} ({row['Professor']})")
                 if row['Status'] == "Pendente":
+                    gerenciar_som("grave", f"p{row['Data']}")
                     if st.button("Atender", key=f"v{i}"): atualizar_alerta_status(row['Turma'], "Em Atendimento"); st.rerun()
 
         tab1, tab2, tab3, tab4 = st.tabs(["🔥 Feed", "🏫 Histórico", "🖨️ Relatórios", "⚙️ Admin"])
@@ -449,36 +378,39 @@ elif menu == "Painel Gestão":
         with tab1:
             if not df_oc.empty and 'Status_Gestao' in df_oc.columns:
                 f_st = st.selectbox("Visualizar:", ["Pendentes", "Arquivados", "Todos"])
-                
-                # CORREÇÃO FILTRO VISUALIZAR
                 df_show = df_oc
-                if f_st == "Pendentes": 
-                    # Considera pendente se for nulo, vazio ou "Pendente"
-                    df_show = df_oc[df_oc['Status_Gestao'].fillna("Pendente").isin(["Pendente", ""])]
-                elif f_st == "Arquivados": 
-                    df_show = df_oc[df_oc['Status_Gestao'] == "Arquivado"]
+                if f_st == "Pendentes": df_show = df_oc[df_oc['Status_Gestao'].fillna("Pendente").isin(["Pendente", ""])]
+                elif f_st == "Arquivados": df_show = df_oc[df_oc['Status_Gestao'] == "Arquivado"]
                 
                 if df_show.empty: st.success("Tudo em ordem.")
-                else:
-                    for idx, row in df_show.iloc[::-1].iterrows():
-                        cor = "#ffe6e6" if "Alta" in str(row.get('Acao_Sugerida')) else "#fff3cd"
-                        with st.container():
-                            st.markdown(f"""<div class="card" style="background:{cor}; border-left:5px solid orange">
-                            <b>{row['Aluno']}</b> ({row['Turma']})<br><i>"{row['Descricao']}"</i></div>""", unsafe_allow_html=True)
-                            
-                            if st.session_state.id_intervencao_ativa == idx:
-                                txt = st.text_area("Ação:", key=f"tx{idx}")
-                                if st.button("Salvar", key=f"sv{idx}"):
-                                    atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", txt)
-                                    st.session_state.pdf_buffer = gerar_pdf_continuo(pd.DataFrame([row.to_dict() | {'Intervencao': txt}]))
-                                    st.session_state.id_intervencao_ativa = None; st.rerun()
-                            else:
-                                if st.button("Intervir", key=f"b{idx}"): st.session_state.id_intervencao_ativa = idx; st.rerun()
+                
+                # Verifica novidades
+                pendentes_geral = df_oc[df_oc['Status_Gestao'].isin(["Pendente", ""])]
+                if len(pendentes_geral) > st.session_state.total_ocorrencias:
+                    gerenciar_som("normal", f"n{len(pendentes_geral)}"); st.toast("🔔 Nova Ocorrência!"); st.session_state.total_ocorrencias = len(pendentes_geral)
 
-        with tab2: # Histórico
+                for idx, row in df_show.iloc[::-1].iterrows():
+                    cor = "#ffe6e6" if "Alta" in str(row.get('Acao_Sugerida')) else "#fff3cd"
+                    if "Alta" in str(row.get('Acao_Sugerida')) and f_st != "Arquivados": 
+                        gerenciar_som("grave", f"g{row['Data']}{row['Aluno']}")
+
+                    with st.container():
+                        st.markdown(f"""<div class="card" style="background:{cor}; border-left:5px solid orange">
+                        <b>{row['Aluno']}</b> ({row['Turma']})<br><i>"{row['Descricao']}"</i></div>""", unsafe_allow_html=True)
+                        
+                        if st.session_state.id_intervencao_ativa == idx:
+                            txt = st.text_area("Ação:", key=f"tx{idx}")
+                            if st.button("Salvar", key=f"sv{idx}"):
+                                atualizar_status_gestao(row['Aluno'], row['Data'], "Arquivado", txt)
+                                st.session_state.pdf_buffer = gerar_pdf_continuo(pd.DataFrame([row.to_dict() | {'Intervencao': txt}]))
+                                st.session_state.id_intervencao_ativa = None; st.rerun()
+                        else:
+                            if st.button("Intervir", key=f"b{idx}"): st.session_state.id_intervencao_ativa = idx; st.rerun()
+
+        with tab2: 
             if not df_oc.empty: st.dataframe(df_oc)
 
-        with tab3: # Relatórios
+        with tab3:
             st.header("🖨️ Relatórios (PDF)")
             if not df_oc.empty:
                 mod = st.radio("Modo:", ["Por Aluno", "Por Turma"])
