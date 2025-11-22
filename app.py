@@ -133,7 +133,6 @@ def carregar_gestores():
         return pd.DataFrame(d)
     except: return pd.DataFrame()
 
-# --- A FUNÇÃO QUE FALTAVA ---
 @st.cache_data(ttl=3600)
 def carregar_alunos_contatos(): 
     try:
@@ -236,7 +235,7 @@ def gerar_mensagem_whats(aluno, responsavel, fato, intervencao):
         return resp.text
     except: return f"Olá {responsavel}, sobre aluno {aluno}: {fato}."
 
-# --- PDF ---
+# --- PDF (Design Limpo) ---
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 16); self.cell(0, 10, 'EDUGESTOR - RELATÓRIO', 0, 1, 'C'); self.ln(5); self.line(10, 25, 200, 25)
@@ -246,16 +245,21 @@ class PDF(FPDF):
 def desenhar_pagina_ocorrencia(pdf, dados):
     def limpa(t): return str(t).encode('latin-1', 'replace').decode('latin-1')
     pdf.set_font("Arial", size=12)
+    # Cabeçalho Dados
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa(f"REGISTRO DE OCORRÊNCIA - {dados['Data']}"), 0, 1, 'L', True); pdf.ln(5)
+    
     pdf.set_font("Arial", 'B', 11); pdf.cell(25, 8, "Aluno:", 0, 0); pdf.set_font("Arial", '', 11); pdf.cell(80, 8, limpa(dados['Aluno']), 0, 0)
     pdf.set_font("Arial", 'B', 11); pdf.cell(20, 8, "Turma:", 0, 0); pdf.set_font("Arial", '', 11); pdf.cell(0, 8, limpa(dados['Turma']), 0, 1)
     pdf.set_font("Arial", 'B', 11); pdf.cell(25, 8, "Prof:", 0, 0); pdf.set_font("Arial", '', 11); pdf.cell(0, 8, limpa(dados['Professor']), 0, 1)
     pdf.line(10, pdf.get_y()+5, 200, pdf.get_y()+5); pdf.ln(10)
+    
     pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa("DESCRIÇÃO:"), 0, 1)
     pdf.set_font("Arial", '', 11); pdf.multi_cell(0, 6, limpa(dados['Descricao'])); pdf.ln(8)
+    
     pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, limpa("INTERVENÇÃO / ENCAMINHAMENTO:"), 0, 1)
     pdf.set_font("Arial", '', 11); pdf.multi_cell(0, 6, limpa(dados.get('Intervencao', '') or "Sem registro."))
+    
     pdf.set_y(-50); y = pdf.get_y(); pdf.set_font("Arial", '', 9)
     pdf.line(20, y, 90, y); pdf.text(40, y+5, limpa("Aluno(a)"))
     pdf.line(120, y, 190, y); pdf.text(140, y+5, limpa("Responsável"))
@@ -317,11 +321,12 @@ if menu == "Acesso Professor":
                     df = carregar_professores()
                     if not df.empty:
                         df['Codigo'] = df['Codigo'].astype(str)
-                        if not df[(df['Nome'] == ln) & (df['Codigo'] == lc)].empty:
+                        usuario = df[(df['Nome'] == ln) & (df['Codigo'] == lc)]
+                        if not usuario.empty:
                             st.session_state.prof_logado = True; st.session_state.prof_nome = ln
                             
-                            # LÓGICA DE TURMAS PERMITIDAS
-                            turmas_raw = str(df[(df['Nome'] == ln)].iloc[0].get('Turmas', '')).strip()
+                            # --- CORREÇÃO: CARREGA TURMAS AO LOGAR ---
+                            turmas_raw = str(usuario.iloc[0].get('Turmas', '')).strip()
                             if turmas_raw: st.session_state.prof_turmas_permitidas = [t.strip() for t in turmas_raw.split(",") if t.strip()]
                             else: st.session_state.prof_turmas_permitidas = ["6A","6B","7A","7B","8A","8B","9A","9B"]
                             
@@ -330,6 +335,10 @@ if menu == "Acesso Professor":
                     else: st.error("Erro ao conectar com a escola.")
     
     else:
+        # --- CORREÇÃO: SE RECUPERAR SESSÃO E LISTA TIVER VAZIA ---
+        if not st.session_state.prof_turmas_permitidas:
+             st.session_state.prof_turmas_permitidas = ["6A","6B","7A","7B","8A","8B","9A","9B"]
+
         # HEADER
         c_head1, c_head2 = st.columns([5,1])
         with c_head1: st.markdown(f"## Olá, **{st.session_state.prof_nome}**")
@@ -340,7 +349,7 @@ if menu == "Acesso Professor":
         tab_reg, tab_hist = st.tabs(["📝 Registrar Ocorrência", "🗂️ Meus Registros"])
 
         with tab_reg:
-            with st.expander("🚨 Botão de Emergência (Clique aqui apenas em caso grave)"):
+            with st.expander("🚨 CHAMAR GESTÃO (Clique aqui apenas em caso grave)"):
                 st.warning("Isso enviará um alerta vermelho para a sala da direção.")
                 if st.button("CHAMAR AJUDA AGORA", type="primary"):
                     salvar_alerta("Sala Indefinida (Ver Prof)", st.session_state.prof_nome)
@@ -523,11 +532,9 @@ elif menu == "Painel Gestão":
                     gerenciar_som("normal", f"n{qtd_atual}"); st.toast("🔔 Nova Ocorrência!"); st.session_state.total_ocorrencias = qtd_atual
 
             if not df_oc.empty and 'Status_Gestao' in df_oc.columns:
-                # DASHBOARD GRÁFICOS (OPCIONAL - SE QUISER ATIVAR DEPOIS)
-                # g1, g2 = st.columns(2)
-                # with g1: st.plotly_chart(px.bar(df_oc['Turma'].value_counts(), title="Por Turma"), use_container_width=True)
-                
+                contagem = df_oc['Aluno'].value_counts()
                 filtro_status = st.selectbox("Filtrar:", ["Pendentes", "Arquivados", "Todos"], label_visibility="collapsed")
+                
                 if filtro_status == "Pendentes": df_show = df_oc[df_oc['Status_Gestao'] != "Arquivado"]
                 elif filtro_status == "Arquivados": df_show = df_oc[df_oc['Status_Gestao'] == "Arquivado"]
                 else: df_show = df_oc
